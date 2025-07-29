@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 
 
+
+
 # Levanto datos historicos de los aportes del proceso estocastico "Historico_Markov_2025_116c"
 rutaArchivo = r'D:\Reinforcement_learning\Proyecto_Final\Datos\MOP\datosProcHistorico.xlt'
 df = pd.read_csv(rutaArchivo, sep='\s+', header=7, encoding='cp1252')
