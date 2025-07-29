@@ -5,7 +5,7 @@ import numpy as np
 
 
 # Levanto datos historicos de los aportes del proceso estocastico "Historico_Markov_2025_116c"
-rutaArchivo = r'D:\Reinforcement_learning\Proyecto_Final\Datos\MOP\datosProcHistorico.xlt'
+rutaArchivo = r'C:\Users\E090219\Desktop\Cursos\TAR\Reinforcement_learning\Proyecto_Final\Datos\MOP\datosProcHistorico.xlt'
 df = pd.read_csv(rutaArchivo, sep='\s+', header=7, encoding='cp1252')
 df['APORTE-SALTO'] = df['APORTE-SALTO']/2
 
@@ -72,7 +72,7 @@ def calcular_matriz_transicion(origen, destino, clases=5):
             matriz[int(o), int(d)] += 1
 
     # Convertir a porcentajes fila a fila (porcentaje de transiciones desde cada estado)
-    matriz_porcentual = matriz / matriz.sum(axis=1, keepdims=True) * 100
+    matriz_porcentual = matriz / matriz.sum(axis=1, keepdims=True)
 
     return matriz, matriz_porcentual
 
