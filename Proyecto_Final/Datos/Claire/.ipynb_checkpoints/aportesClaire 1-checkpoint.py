@@ -72,7 +72,7 @@ def calcular_matriz_transicion(origen, destino, clases=5):
             matriz[int(o), int(d)] += 1
 
     # Convertir a porcentajes fila a fila (porcentaje de transiciones desde cada estado)
-    matriz_porcentual = matriz / matriz.sum(axis=1, keepdims=True) * 100
+    matriz_porcentual = matriz / matriz.sum(axis=1, keepdims=True)
 
     return matriz, matriz_porcentual
 
