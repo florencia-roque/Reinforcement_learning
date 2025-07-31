@@ -1,11 +1,12 @@
 from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
 import numpy as np
 import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.wrappers import TimeLimit
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -109,7 +110,7 @@ class HydroThermalEnv(gym.Env):
         # retorna el estado inicial del estado hidrológico 0,1,2,3,4
         self.c = self._sortear_cronica_inicial()
         print("La cronica sorteada es: ", self.c)
-        h0 = self.data_matriz_aportes_discreta.iloc[self.T0,self.c]
+        h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.c]
         return int(h0) # type: ignore
 
     def _siguiente_hidrologia(self):
@@ -119,21 +120,22 @@ class HydroThermalEnv(gym.Env):
         siguiente_eshy = np.random.choice(self.clases_hidrologia, p=self.matrices_hidrologicas[self.t][self.h,:])
         return siguiente_eshy
 
-    def _rotar_fila(self, fila):
+    def _rotar_fila(self, fila: pd.Series):
+        # rota a la izquierda: s = [x0, x1, x2, ...] -> [x1, x2, ..., x0]
         valores = fila.tolist()
-        valor = fila.pop(0)
-        valores.append(valor)
-        nueva_fila = pd.DataFrame([valores], columns=fila.columns)
-        return nueva_fila
+        if len(valores) == 0:
+            return fila.copy()
+        rotada = valores[1:] + [valores[0]]
+        return pd.Series(rotada, index=fila.index)
     
     def _aportes(self):
         # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, sorteo una ocurrencia de aportes para el lago claire
         estados_ini = self.data_matriz_aportes_discreta.loc[self.t] 
 
-        if(self.t < 51):
+        if self.t < 51:
             estados_fin = self.data_matriz_aportes_discreta.loc[self.t+1] 
         else:
-            estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0]) 
+            estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  # type: ignore
 
         coincidencias = (estados_ini == self.h_anterior) & (estados_fin == self.h)
         columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] # type: ignore
@@ -327,17 +329,30 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 
         return np.concatenate(([v_norm], hidro_oh, time_oh), axis=0)
 
+def make_train_env():
+    env = HydroThermalEnv()
+    env = OneHotFlattenObs(env)
+    env = TimeLimit(env, max_episode_steps=104)
+    return env
+
+def make_eval_env():
+    env = HydroThermalEnv()
+    env = OneHotFlattenObs(env)
+    env = TimeLimit(env, max_episode_steps=104)
+    return env
+
 if __name__ == "__main__":
-    # Crear un entorno vectorizado con múltiples instancias
-    vec_env = make_vec_env(
-        HydroThermalEnv,
-        n_envs=8,
-        vec_env_cls=SubprocVecEnv,
-        seed=42,
-        wrapper_class=OneHotFlattenObs
-    )
+    # vectorizado de entrenamiento (8 envs en procesos separados)
+    vec_env = SubprocVecEnv([make_train_env for _ in range(1)])
+
+    # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
+    eval_env = DummyVecEnv([make_eval_env])
 
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
-    model.learn(total_timesteps=1_000_000)
-    # Guardar el modelo entrenado
+
+    # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos * 8 envs
+    total_episodes = 5000
+    total_timesteps = total_episodes * 104 * 8  # = 4_160_000
+
+    model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
