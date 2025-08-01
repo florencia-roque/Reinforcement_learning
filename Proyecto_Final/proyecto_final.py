@@ -152,11 +152,7 @@ class HydroThermalEnv(gym.Env):
     
     def _demanda(self):
         # Leer datos de demanda desde archivo
-        try:
-            energias_demandas = self.data_demanda.iloc[:,self.c]
-        except Exception as e:
-            print(self.data_demanda.head)
-            
+        energias_demandas = self.data_demanda.iloc[:,self.c]
         if self.t < len(energias_demandas):
             return energias_demandas.iloc[self.t]
         else:
@@ -258,12 +254,7 @@ class HydroThermalEnv(gym.Env):
 
         # dinámica: v ← v − q − d + a
         self.h = self._siguiente_hidrologia()
-        try:
-            aportes = self._aportes()
-        except Exception as e:
-            print(f"Error al calcular aportes: {e}")
-            pprint(info)
-            raise e
+        aportes = self._aportes()
         self.v = min(self.v - qt + aportes, self.V_CLAIRE_MAX) # type: ignore
         self.t += 1
         
