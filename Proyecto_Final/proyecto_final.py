@@ -353,7 +353,7 @@ def make_eval_env():
 
 if __name__ == "__main__":
     # vectorizado de entrenamiento (8 envs en procesos separados)
-    vec_env = SubprocVecEnv([make_train_env for _ in range(1)])
+    vec_env = SubprocVecEnv([make_train_env for _ in range(8)])
 
     # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
     eval_env = DummyVecEnv([make_eval_env])
