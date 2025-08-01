@@ -3,8 +3,8 @@ import numpy as np
 
 
 # Levanto datos historicos de los aportes del proceso estocastico "Historico_Markov_2025_116c"
-rutaArchivo = r'D:\Reinforcement_learning\Proyecto_Final\Datos\MOP\datosProcHistorico.xlt'
-df = pd.read_csv(rutaArchivo, sep='\s+', header=7, encoding='cp1252')
+rutaArchivo = 'Datos\Claire\datosProcHistorico2.xlt'
+df = pd.read_csv(rutaArchivo, sep=r'\s+', header=7, encoding='cp1252')
 df['APORTE-SALTO'] = df['APORTE-SALTO']/2
 
 df['APORTE-CLAIRE'] = df[['APORTE-BONETE', 'APORTE-PALMAR', 'APORTE-SALTO']].sum(axis=1)
@@ -39,10 +39,11 @@ df_numeric = df_numeric.dropna()
 # Al final del dataframe agrego la primer fila para que la ultima fila la compare con la primera
 # En esta ultima fila agregada, al primer valor lo pongo al final para que el valor de la semana 52 se compare con la semana 1 del año siguiente
 primer_fila =  df_numeric.iloc[0].tolist()
-valor = primer_fila.pop(1)
+valor = primer_fila.pop(0)
 primer_fila.append(valor)
 nueva_fila = pd.DataFrame([primer_fila], columns=df_numeric.columns)
 df_rotado = pd.concat([df_numeric,nueva_fila], ignore_index=True)
+df_rotado.to_csv("rotado.csv", index=False)
 
 # Número de clases
 n_clases = df_rotado.max().max() 
@@ -71,11 +72,8 @@ for i in range(len(semanas)-1):
     origen = df_rotado.loc[i].values
     destino = df_rotado.loc[i + 1].values
 
-    print(origen)
-    print(destino)
     # Matriz de conteo para esta transición
     matriz = calcular_matriz_transicion(origen=origen, destino=destino)
-    print(matriz)
 
     fila = [i] + matriz[1].flatten().tolist()  # aplana la matriz y agrega el índice
     filas.append(fila)

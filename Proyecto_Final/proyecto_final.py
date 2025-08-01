@@ -142,7 +142,6 @@ class HydroThermalEnv(gym.Env):
         columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] # type: ignore
 
         if len(columnas_validas) == 0:
-
             raise ValueError("No hay coincidencias válidas para los estados hidrológicos actuales")
             
         año_sorteado = np.random.choice(columnas_validas)
@@ -153,7 +152,11 @@ class HydroThermalEnv(gym.Env):
     
     def _demanda(self):
         # Leer datos de demanda desde archivo
-        energias_demandas = self.data_demanda.iloc[:,self.c]
+        try:
+            energias_demandas = self.data_demanda.iloc[:,self.c]
+        except Exception as e:
+            print(self.data_demanda.head)
+            
         if self.t < len(energias_demandas):
             return energias_demandas.iloc[self.t]
         else:
@@ -240,7 +243,6 @@ class HydroThermalEnv(gym.Env):
         info = {
             "volumen": self.v,
             "hidrologia": self.h,
-            "hidrologia_anterior": self.h_anterior,
             "tiempo": self.t,
             "turbinado": qt,
             "energia_turbinada": qt * self.K_CLAIRE,
