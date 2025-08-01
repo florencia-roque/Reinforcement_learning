@@ -68,7 +68,7 @@ class HydroThermalEnv(gym.Env):
         self.observation_space = spaces.Dict({
             "volumen": spaces.Box(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, shape=(), dtype=np.float32),
             "hidrologia": spaces.Discrete(self.N_HIDRO, start=0),
-            "tiempo": spaces.Discrete(self.T_MAX, start=0)
+            "tiempo": spaces.Discrete(self.T_MAX + 1, start=0)
         })
         
         # Fracción a turbinar del volumen del embalse
@@ -135,7 +135,7 @@ class HydroThermalEnv(gym.Env):
         if self.t == 51 or self.t == 103:
             estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  # type: ignore
         else:
-            estados_fin = self.data_matriz_aportes_discreta.loc[self.t+1 % 52] 
+            estados_fin = self.data_matriz_aportes_discreta.loc[(self.t + 1) % 52] 
 
         coincidencias = (estados_ini == self.h_anterior) & (estados_fin == self.h)
         columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] # type: ignore
@@ -332,13 +332,13 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 def make_train_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
-    env = TimeLimit(env, max_episode_steps=104)
+    env = TimeLimit(env, max_episode_steps=103)
     return env
 
 def make_eval_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
-    env = TimeLimit(env, max_episode_steps=104)
+    env = TimeLimit(env, max_episode_steps=103)
     return env
 
 if __name__ == "__main__":
