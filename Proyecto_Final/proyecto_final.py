@@ -19,7 +19,7 @@ def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
 
 class HydroThermalEnv(gym.Env):
     T0 = 0
-    T_MAX = 104  # Número máximo de pasos (2 años, 52 semanas * 2)
+    T_MAX = 103
     N_HIDRO = 5
 
     P_BON_MAX = 155
@@ -116,8 +116,8 @@ class HydroThermalEnv(gym.Env):
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
         self.h_anterior = self.h
-        self.clases_hidrologia = np.arange(self.matrices_hidrologicas[self.t].shape[0]) # array con las clases 0,1,2,3,4
-        siguiente_eshy = np.random.choice(self.clases_hidrologia, p=self.matrices_hidrologicas[self.t][self.h,:])
+        self.clases_hidrologia = np.arange(self.matrices_hidrologicas[self.t % 52].shape[0]) # array con las clases 0,1,2,3,4
+        siguiente_eshy = np.random.choice(self.clases_hidrologia, p=self.matrices_hidrologicas[self.t % 52][self.h,:])
         return siguiente_eshy
 
     def _rotar_fila(self, fila: pd.Series):
@@ -127,15 +127,15 @@ class HydroThermalEnv(gym.Env):
             return fila.copy()
         rotada = valores[1:] + [valores[0]]
         return pd.Series(rotada, index=fila.index)
-    
+
     def _aportes(self):
         # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, sorteo una ocurrencia de aportes para el lago claire
-        estados_ini = self.data_matriz_aportes_discreta.loc[self.t] 
+        estados_ini = self.data_matriz_aportes_discreta.loc[self.t % 52] 
 
-        if self.t < 51:
-            estados_fin = self.data_matriz_aportes_discreta.loc[self.t+1] 
-        else:
+        if self.t == 51 or self.t == 103:
             estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  # type: ignore
+        else:
+            estados_fin = self.data_matriz_aportes_discreta.loc[self.t+1 % 52] 
 
         coincidencias = (estados_ini == self.h_anterior) & (estados_fin == self.h)
         columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] # type: ignore
@@ -146,7 +146,7 @@ class HydroThermalEnv(gym.Env):
         año_sorteado = np.random.choice(columnas_validas)
 
         # Obtener valor en claire para fila2 y ese año
-        valor_claire = self.data_matriz_aportes_claire.loc[self.t, año_sorteado]
+        valor_claire = self.data_matriz_aportes_claire.loc[self.t % 52, año_sorteado]
         return valor_claire
     
     def _demanda(self):
@@ -278,7 +278,7 @@ class HydroThermalEnv(gym.Env):
     
     def render(self, mode='human'):
         if mode == 'human':
-            print(f"Semana {self.t}/52:")
+            print(f"Semana {self.t}:")
             print(f"  Volumen embalse: {self.v:.2f}/{self.V_CLAIRE_MAX}")
             print(f"  Estado hidrológico: {self.h}")
             print(f"  Porcentaje llenado: {(self.v/self.V_CLAIRE_MAX)*100:.1f}%")
@@ -350,9 +350,9 @@ if __name__ == "__main__":
 
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
 
-    # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos * 8 envs
+    # calcular total_timesteps: por ejemplo 5000 episodios * 103 pasos * 8 envs
     total_episodes = 5000
-    total_timesteps = total_episodes * 104 * 8  # = 4_160_000
+    total_timesteps = total_episodes * 103 * 8
 
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
