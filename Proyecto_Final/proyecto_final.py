@@ -7,6 +7,7 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
+from pprint import pprint
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -253,7 +254,12 @@ class HydroThermalEnv(gym.Env):
 
         # dinámica: v ← v − q − d + a
         self.h = self._siguiente_hidrologia()
-        aportes = self._aportes()
+        try:
+            aportes = self._aportes()
+        except Exception as e:
+            print(f"Error al calcular aportes: {e}")
+            pprint(info)
+            raise e
         self.v = min(self.v - qt + aportes, self.V_CLAIRE_MAX) # type: ignore
         self.t += 1
         
