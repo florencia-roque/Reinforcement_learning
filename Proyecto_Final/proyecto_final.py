@@ -291,11 +291,11 @@ class HydroThermalEnv(gym.Env):
 class OneHotFlattenObs(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.num_weeks = 52
 
         # "Desenvuelvo" el Monitor (y cualquier otro wrapper) para acceder a N_HIDRO
         n_hidro = self.env.unwrapped.N_HIDRO # type: ignore
-        dim = 1 + n_hidro + self.num_weeks
+        # 1 para volumen normalizado, n_hidro para one-hot de hidrología, T_MAX para one-hot de tiempo
+        dim = 1 + n_hidro + HydroThermalEnv.T_MAX
 
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(dim,), dtype=np.float32
@@ -308,8 +308,8 @@ class OneHotFlattenObs(gym.ObservationWrapper):
         hidro_oh = np.zeros(self.env.unwrapped.N_HIDRO, dtype=np.float32) # type: ignore
 
         hidro_oh[h] = 1.0
-        semana = obs["tiempo"] % self.num_weeks
-        time_oh = np.zeros(self.num_weeks, dtype=np.float32)
+        semana = obs["tiempo"] % HydroThermalEnv.T_MAX
+        time_oh = np.zeros(HydroThermalEnv.T_MAX, dtype=np.float32)
         time_oh[semana] = 1.0
 
         return np.concatenate(([v_norm], hidro_oh, time_oh), axis=0)
@@ -326,13 +326,10 @@ def make_eval_env():
     env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX)
     return env
 
-if __name__ == "__main__":
+def train():
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
-
-    # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
-    eval_env = DummyVecEnv([make_eval_env])
 
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
 
@@ -342,3 +339,26 @@ if __name__ == "__main__":
 
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
+
+if __name__ == "__main__":
+    model = A2C.load("a2c_hydro_thermal_claire")
+    if model is None:
+        print("No se pudo cargar el modelo, entrenando uno nuevo...")
+        train()
+        model = A2C.load("a2c_hydro_thermal_claire")
+
+    # Evaluar el modelo
+    # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
+    eval_env = make_eval_env()
+    obs, info = eval_env.reset() # type: ignore
+    done = False
+    reward_sum = 0.0
+
+    print("Iniciando evaluación del modelo...")
+    # Evaluar el modelo en un episodio
+    while not done:
+        action, _ = model.predict(obs) # type: ignore
+        obs, reward, done, _, info = eval_env.step(action) # type: ignore
+        reward_sum += reward # type: ignore
+
+    print(f"Recompensa total en evaluación: {reward_sum:.2f}")
