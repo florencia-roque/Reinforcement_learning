@@ -23,48 +23,28 @@ class HydroThermalEnv(gym.Env):
     T_MAX = 103
     N_HIDRO = 5
 
-    P_BON_MAX = 155
-    P_BAY_MAX = 108
-    P_PAL_MAX = 333
-    P_SAL_MAX = 1890
-    P_CLAIRE_MAX = P_BON_MAX + P_BAY_MAX + P_PAL_MAX + P_SAL_MAX
-
+    P_CLAIRE_MAX = 1541
     P_SOLAR_MAX = 254
     P_EOLICO_MAX = 1584.7
     P_BIOMASA_MAX = 487.3
-
     # to-do: revisar si estos valores son correctos
     P_TERMICO_BAJO_MAX = 10000
     P_TERMICO_ALTO_MAX = np.inf
 
-    Q_BON_MAX = 680
-    Q_BAY_MAX = 828
-    Q_PAL_MAX = 1372
-    Q_SAL_MAX = 4200
-    Q_CLAIRE_MAX = Q_BON_MAX + Q_BAY_MAX + Q_PAL_MAX + Q_SAL_MAX
+    Q_CLAIRE_MAX = 7081
 
-    V_BON_MAX = 8200
-    V_BAY_MAX = 0
-    V_PAL_MAX = 1300
-    V_SAL_MAX = 1500
-    V_CLAIRE_MAX = V_BON_MAX + V_BAY_MAX + V_PAL_MAX + V_SAL_MAX
     V_CLAIRE_MIN = 0
+    V_CLAIRE_MAX = 11000
+    V0 = V_CLAIRE_MAX / 2
 
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX
-
-    V0 = V_CLAIRE_MAX / 2
 
     # to-do: revisar si estos valores son correctos
     VALOR_EXPORTACION = 12.5  
     COSTO_TERMICO_BAJO = 100  
     COSTO_TERMICO_ALTO = 200  
 
-    SEMILLA = None # Para reproducibilidad, puedes fijar una semilla si lo deseas
-
     def __init__(self):
-        if self.SEMILLA is not None:
-            np.random.seed(self.SEMILLA)
-
         # Espacio de observación
         self.observation_space = spaces.Dict({
             "volumen": spaces.Box(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, shape=(), dtype=np.float32),
@@ -79,10 +59,10 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
         
-        # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
+        # cargar matriz de aportes de Claire
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
         
-        # Cargar datos de energías
+        # Cargar datos de energías renovables y demanda
         self.data_biomasa = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=0)
         self.data_biomasa = self.data_biomasa.iloc[:,1:]
         self.data_eolico = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=1)
@@ -92,7 +72,7 @@ class HydroThermalEnv(gym.Env):
         self.data_demanda = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=3)
         self.data_demanda = self.data_demanda.iloc[:,1:]
 
-        # Cargar datos de matrices hidrológicas
+        # Cargar datos de matrices hidrológicas con las probabilidades de transición entre estados
         self.data_matrices_hidrologicas = leer_archivo(f"Datos\\Claire\\matrices_sem.csv", sep=",", header=0)
         self.data_matrices_hidrologicas = self.data_matrices_hidrologicas.iloc[:, 1:] # Quito la columna de semanas
         self.matrices_hidrologicas = {}
@@ -100,26 +80,39 @@ class HydroThermalEnv(gym.Env):
             array_1d = self.data_matrices_hidrologicas.iloc[i, :].values
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) # type: ignore
 
-        self.v = self.V0                    # Volumen inicial del embalse
-        self.t = 0                          # Tiempo inicial
-        self.h = self._inicial_hidrologia() # Estado hidrológico inicial
+        # Inicializar variables internas
+        self.reset(seed=42)
+
+    def reset(self, *, seed=None, options=None):
+        if seed is not None:
+            np.random.seed(seed)
+        
+        self.volumen = self.V0
+        self.tiempo = 0
+        self.hidrologia = self._inicial_hidrologia()
+        
+        info = {
+            "volumen_inicial": self.volumen,
+            "hidrologia_inicial": self.hidrologia,
+            "tiempo_inicial": self.tiempo
+        }
+        return self._get_obs(), info
 
     def _sortear_cronica_inicial(self):
         return np.random.randint(self.data_matriz_aportes_discreta.shape[1])
     
     def _inicial_hidrologia(self):
         # retorna el estado inicial del estado hidrológico 0,1,2,3,4
-        self.c = self._sortear_cronica_inicial()
-        print("La cronica sorteada es: ", self.c)
-        h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.c]
+        self.cronica = self._sortear_cronica_inicial()
+        h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
         return int(h0) # type: ignore
 
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
-        self.h_anterior = self.h
-        self.clases_hidrologia = np.arange(self.matrices_hidrologicas[self.t % 52].shape[0]) # array con las clases 0,1,2,3,4
-        siguiente_eshy = np.random.choice(self.clases_hidrologia, p=self.matrices_hidrologicas[self.t % 52][self.h,:])
-        return siguiente_eshy
+        self.hidrologia_anterior = self.hidrologia
+        self.clases_hidrologia = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0]) # array con las clases 0,1,2,3,4
+        hidrologia_siguiente = np.random.choice(self.clases_hidrologia, p=self.matrices_hidrologicas[self.tiempo % 52][self.hidrologia,:])
+        return hidrologia_siguiente
 
     def _rotar_fila(self, fila: pd.Series):
         # rota a la izquierda: s = [x0, x1, x2, ...] -> [x1, x2, ..., x0]
@@ -130,15 +123,16 @@ class HydroThermalEnv(gym.Env):
         return pd.Series(rotada, index=fila.index)
 
     def _aportes(self):
-        # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, sorteo una ocurrencia de aportes para el lago claire
-        estados_ini = self.data_matriz_aportes_discreta.loc[self.t % 52] 
+        # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, 
+        # sorteo una ocurrencia de aportes para el lago claire
+        estados_ini = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
-        if self.t == 51 or self.t == 103:
+        if self.tiempo == 51 or self.tiempo == 103:
             estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  # type: ignore
         else:
-            estados_fin = self.data_matriz_aportes_discreta.loc[(self.t + 1) % 52] 
+            estados_fin = self.data_matriz_aportes_discreta.loc[(self.tiempo + 1) % 52] 
 
-        coincidencias = (estados_ini == self.h_anterior) & (estados_fin == self.h)
+        coincidencias = (estados_ini == self.hidrologia_anterior) & (estados_fin == self.hidrologia)
         columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] # type: ignore
 
         if len(columnas_validas) == 0:
@@ -147,38 +141,38 @@ class HydroThermalEnv(gym.Env):
         año_sorteado = np.random.choice(columnas_validas)
 
         # Obtener valor en claire para fila2 y ese año
-        valor_claire = self.data_matriz_aportes_claire.loc[self.t % 52, año_sorteado]
+        valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado]
         return valor_claire
     
     def _demanda(self):
-        # Leer datos de demanda desde archivo
-        energias_demandas = self.data_demanda.iloc[:,self.c]
-        if self.t < len(energias_demandas):
-            return energias_demandas.iloc[self.t]
+        # Obtener demanda de energía para el tiempo actual según la cronica sorteada
+        energias_demandas = self.data_demanda.iloc[:,self.cronica]
+        if self.tiempo < len(energias_demandas):
+            return energias_demandas.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
     def _gen_eolico(self):
-        # Leer datos eólicos desde archivo
-        energias_eolico = self.data_eolico.iloc[:,self.c]
-        if self.t < len(energias_eolico):
-            return energias_eolico.iloc[self.t]
+        # Obtener generación eólica para el tiempo actual según la cronica sorteada
+        energias_eolico = self.data_eolico.iloc[:,self.cronica]
+        if self.tiempo < len(energias_eolico):
+            return energias_eolico.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos eólicos")
 
     def _gen_solar(self):
-        # Leer datos solares desde archivo
-        energias_solar = self.data_solar.iloc[:,self.c]
-        if self.t < len(energias_solar):
-            return energias_solar.iloc[self.t]
+        # Obtener generación solar para el tiempo actual según la cronica sorteada
+        energias_solar = self.data_solar.iloc[:,self.cronica]
+        if self.tiempo < len(energias_solar):
+            return energias_solar.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos solares")
 
     def _gen_bio(self):
-        # Leer datos solares desde archivo
-        energias_biomasa = self.data_biomasa.iloc[:,self.c]
-        if self.t < len(energias_biomasa):
-            return energias_biomasa.iloc[self.t]
+        # Obtener generación de biomasa para el tiempo actual según la cronica sorteada
+        energias_biomasa = self.data_biomasa.iloc[:,self.cronica]
+        if self.tiempo < len(energias_biomasa):
+            return energias_biomasa.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos biomasa")
 
@@ -209,14 +203,16 @@ class HydroThermalEnv(gym.Env):
             energia_termico_bajo = self._gen_termico_bajo(demanda_residual)
             demanda_residual -= energia_termico_bajo
 
+            # Si aún hay demanda residual, uso termico alto
             if demanda_residual > 0:
                 energia_termico_alto = self._gen_termico_alto(demanda_residual)
                 demanda_residual -= energia_termico_alto
 
+        # Si me queda generación, la exporto
         if demanda_residual < 0:
             exportacion = -demanda_residual
 
-        # Retornar ingresos por exportación y costos de térmico
+        # Retornar ingresos por exportación y costos de generación térmica
         ingreso_exportacion = exportacion * self.VALOR_EXPORTACION
         costo_termico = energia_termico_bajo * self.COSTO_TERMICO_BAJO + energia_termico_alto * self.COSTO_TERMICO_ALTO
         return ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto
@@ -228,7 +224,7 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         frac = float(action[0])
-        qt = frac * self.v
+        qt = frac * self.volumen
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
         ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(qt)
@@ -237,9 +233,9 @@ class HydroThermalEnv(gym.Env):
         reward = -costo_termico + ingreso_exportacion
 
         info = {
-            "volumen": self.v,
-            "hidrologia": self.h,
-            "tiempo": self.t,
+            "volumen": self.volumen,
+            "hidrologia": self.hidrologia,
+            "tiempo": self.tiempo,
             "turbinado": qt,
             "energia_turbinada": qt * self.K_CLAIRE,
             "energia_eolica": self._gen_eolico(),
@@ -253,51 +249,39 @@ class HydroThermalEnv(gym.Env):
         }
 
         # dinámica: v ← v − q − d + a
-        self.h = self._siguiente_hidrologia()
+        self.hidrologia = self._siguiente_hidrologia()
         aportes = self._aportes()
-        self.v = min(self.v - qt + aportes, self.V_CLAIRE_MAX) # type: ignore
-        self.t += 1
+        self.volumen = min(self.volumen - qt + aportes, self.V_CLAIRE_MAX) # type: ignore
+        self.tiempo += 1
         
         info["aportes"] = aportes
-        info["volumen_siguiente"] = self.v
-        info["hidrologia_siguiente"] = self.h
-        info["tiempo_siguiente"] = self.t
+        info["volumen_siguiente"] = self.volumen
+        info["hidrologia_siguiente"] = self.hidrologia
+        info["tiempo_siguiente"] = self.tiempo
 
-        done = (self.t >= self.T_MAX)
+        done = (self.tiempo >= self.T_MAX)
         return self._get_obs(), reward, done, False, info
-    
-    def reset(self, *, seed=None, options=None):
-        self.v = self.V0
-        self.t = 0
-        self.h = self._inicial_hidrologia()
-        info = {
-            "volumen_inicial": self.v,
-            "hidrologia_inicial": self.h,
-            "tiempo_inicial": self.t
-        }
-        return self._get_obs(), info
     
     def render(self, mode='human'):
         if mode == 'human':
-            print(f"Semana {self.t}:")
-            print(f"  Volumen embalse: {self.v:.2f}/{self.V_CLAIRE_MAX}")
-            print(f"  Estado hidrológico: {self.h}")
-            print(f"  Porcentaje llenado: {(self.v/self.V_CLAIRE_MAX)*100:.1f}%")
+            print(f"Semana {self.tiempo}:")
+            print(f"  Volumen embalse: {self.volumen:.2f}/{self.V_CLAIRE_MAX}")
+            print(f"  Estado hidrológico: {self.hidrologia}")
+            print(f"  Porcentaje llenado: {(self.volumen/self.V_CLAIRE_MAX)*100:.1f}%")
             print("-" * 30)
         elif mode == 'rgb_array':
             # Retornar una imagen como array numpy para grabación
             pass
         elif mode == 'ansi':
             # Retornar string para mostrar en terminal
-            return f"T:{self.t} V:{self.v:.1f} H:{self.h}"
+            return f"T:{self.tiempo} V:{self.volumen:.1f} H:{self.hidrologia}"
         
     def _get_obs(self):
         # Mapeo de variables internas a observación del agente
-
         obs = {
-            "volumen": np.array(self.v, dtype=np.float32),
-            "hidrologia": int(self.h),
-            "tiempo": int(self.t)
+            "volumen": np.array(self.volumen, dtype=np.float32),
+            "hidrologia": int(self.hidrologia),
+            "tiempo": int(self.tiempo)
         }
         
         # Validar contra observation_space (opcional, útil para debug)
@@ -333,18 +317,19 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 def make_train_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
-    env = TimeLimit(env, max_episode_steps=103)
+    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX)
     return env
 
 def make_eval_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
-    env = TimeLimit(env, max_episode_steps=103)
+    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX)
     return env
 
 if __name__ == "__main__":
     # vectorizado de entrenamiento (8 envs en procesos separados)
-    vec_env = SubprocVecEnv([make_train_env for _ in range(8)])
+    n_envs = 8
+    vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
 
     # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
     eval_env = DummyVecEnv([make_eval_env])
@@ -353,7 +338,7 @@ if __name__ == "__main__":
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 103 pasos * 8 envs
     total_episodes = 5000
-    total_timesteps = total_episodes * 103 * 8
+    total_timesteps = total_episodes * HydroThermalEnv.T_MAX * n_envs
 
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
