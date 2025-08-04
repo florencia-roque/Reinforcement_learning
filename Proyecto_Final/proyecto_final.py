@@ -59,7 +59,7 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
         
-        # cargar matriz de aportes de Claire
+        # cargar matriz de aportes continuos
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
         
         # Cargar datos de energías renovables y demanda
