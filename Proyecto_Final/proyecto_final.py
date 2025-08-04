@@ -7,6 +7,7 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
+import os
 from pprint import pprint
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
@@ -341,11 +342,23 @@ def train():
     model.save("a2c_hydro_thermal_claire")
 
 if __name__ == "__main__":
-    model = A2C.load("a2c_hydro_thermal_claire")
-    if model is None:
-        print("No se pudo cargar el modelo, entrenando uno nuevo...")
+    model_path = "a2c_hydro_thermal_claire"
+    
+    # Verificar si el archivo del modelo existe
+    if os.path.exists(f"{model_path}.zip"):
+        try:
+            print(f"Cargando modelo desde {model_path}...")
+            model = A2C.load(model_path)
+            print("Modelo cargado exitosamente.")
+        except Exception as e:
+            print(f"Error al cargar el modelo: {e}")
+            print("Entrenando un modelo nuevo...")
+            train()
+            model = A2C.load(model_path)
+    else:
+        print("Archivo del modelo no encontrado, entrenando uno nuevo...")
         train()
-        model = A2C.load("a2c_hydro_thermal_claire")
+        model = A2C.load(model_path)
 
     # Evaluar el modelo
     # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
