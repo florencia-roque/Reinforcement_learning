@@ -27,6 +27,7 @@ class HydroThermalEnv(gym.Env):
     P_BAY_MAX = 108
     P_PAL_MAX = 333
     P_SAL_MAX = 1890
+    # to-do: revisar si no iría P_SAL_MAX/2
     P_CLAIRE_MAX = P_BON_MAX + P_BAY_MAX + P_PAL_MAX + P_SAL_MAX
 
     P_SOLAR_MAX = 254
@@ -41,6 +42,7 @@ class HydroThermalEnv(gym.Env):
     Q_BAY_MAX = 828
     Q_PAL_MAX = 1372
     Q_SAL_MAX = 4200
+    # to-do: revisar si no iría Q_SAL_MAX/2
     Q_CLAIRE_MAX = Q_BON_MAX + Q_BAY_MAX + Q_PAL_MAX + Q_SAL_MAX
 
     V_BON_MAX = 8200
@@ -59,7 +61,7 @@ class HydroThermalEnv(gym.Env):
     COSTO_TERMICO_BAJO = 100  
     COSTO_TERMICO_ALTO = 200  
 
-    SEMILLA = None # Para reproducibilidad, puedes fijar una semilla si lo deseas
+    SEMILLA = None # Para reproducibilidad se puede fijar una semilla
 
     def __init__(self):
         if self.SEMILLA is not None:
@@ -79,7 +81,7 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
         
-        # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
+        # cargar matriz de aportes continuos
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
         
         # Cargar datos de energías
