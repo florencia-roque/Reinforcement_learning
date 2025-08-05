@@ -328,7 +328,7 @@ def train():
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 5000
+    total_episodes = 10000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps)
@@ -383,6 +383,15 @@ if __name__ == "__main__":
         # evaluar como funciona hasta el primer año
         if info["tiempo"] == 51:
             break
+
+    df_eval = pd.DataFrame({
+        "step": steps_list,
+        "action": actions_list,
+        "reward": rewards_list
+    })
+
+    df_eval.to_csv("evaluacion_acciones_recompensas.csv", index=False)
+    print("Resultados guardados en evaluacion_acciones_recompensas.csv")
 
     print(f"Recompensa total en evaluación: {reward_sum:.2f}")
 
