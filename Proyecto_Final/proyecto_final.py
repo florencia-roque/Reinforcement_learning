@@ -2,6 +2,7 @@ from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import gymnasium as gym
@@ -293,10 +294,8 @@ class OneHotFlattenObs(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
 
-        # "Desenvuelvo" el Monitor (y cualquier otro wrapper) para acceder a N_HIDRO
-        n_hidro = self.env.unwrapped.N_HIDRO # type: ignore
-        # 1 para volumen normalizado, n_hidro para one-hot de hidrología, T_MAX para one-hot de tiempo
-        dim = 1 + n_hidro + HydroThermalEnv.T_MAX
+        # 1 para volumen normalizado, n_hidro para one-hot de hidrología, T_MAX + 1 para one-hot de tiempo
+        dim = 1 + HydroThermalEnv.N_HIDRO + HydroThermalEnv.T_MAX + 1
 
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(dim,), dtype=np.float32
@@ -304,13 +303,13 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 
     def observation(self, obs):
         # idem: si necesitas V_CLAIRE_MAX usa self.env.unwrapped.V_CLAIRE_MAX
-        v_norm = obs["volumen"] / self.env.unwrapped.V_CLAIRE_MAX # type: ignore
+        v_norm = obs["volumen"] / HydroThermalEnv.V_CLAIRE_MAX # type: ignore
         h = obs["hidrologia"]
-        hidro_oh = np.zeros(self.env.unwrapped.N_HIDRO, dtype=np.float32) # type: ignore
+        hidro_oh = np.zeros(HydroThermalEnv.N_HIDRO, dtype=np.float32) # type: ignore
 
         hidro_oh[h] = 1.0
         semana = obs["tiempo"] % HydroThermalEnv.T_MAX
-        time_oh = np.zeros(HydroThermalEnv.T_MAX, dtype=np.float32)
+        time_oh = np.zeros(HydroThermalEnv.T_MAX + 1, dtype=np.float32)
         time_oh[semana] = 1.0
 
         return np.concatenate(([v_norm], hidro_oh, time_oh), axis=0)
@@ -318,13 +317,7 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 def make_train_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
-    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX)
-    return env
-
-def make_eval_env():
-    env = HydroThermalEnv()
-    env = OneHotFlattenObs(env)
-    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX)
+    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
     return env
 
 def train():
@@ -334,9 +327,9 @@ def train():
 
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
 
-    # calcular total_timesteps: por ejemplo 5000 episodios * 103 pasos * 8 envs
+    # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 5000
-    total_timesteps = total_episodes * HydroThermalEnv.T_MAX * n_envs
+    total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
@@ -361,17 +354,51 @@ if __name__ == "__main__":
         model = A2C.load(model_path)
 
     # Evaluar el modelo
-    # entorno de evaluación (no paralelo aquí, o podes hacer otro vectorizado)
-    eval_env = make_eval_env()
+    # entorno de evaluación (no paralelo aquí, o se puede hacer otro vectorizado)
+    eval_env = make_train_env()
     obs, info = eval_env.reset() # type: ignore
     done = False
     reward_sum = 0.0
 
+    actions_list = []
+    rewards_list = []
+    steps_list = []
+
     print("Iniciando evaluación del modelo...")
+    step = 0 
     # Evaluar el modelo en un episodio
-    while not done:
+    while True:
         action, _ = model.predict(obs) # type: ignore
         obs, reward, done, _, info = eval_env.step(action) # type: ignore
+
         reward_sum += reward # type: ignore
 
+        # Guardar datos para graficar
+        steps_list.append(step)
+        actions_list.append(action[0] if hasattr(action, "__len__") else action)
+        rewards_list.append(reward)
+
+        step += 1
+
+        # evaluar como funciona hasta el primer año
+        if info["tiempo"] == 51:
+            break
+
     print(f"Recompensa total en evaluación: {reward_sum:.2f}")
+
+    # Graficar acciones y recompensas
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+
+    # Acciones
+    ax1.plot(steps_list, actions_list, marker='o', color='tab:blue')
+    ax1.set_ylabel("Acción")
+    ax1.set_title("Acciones vs Pasos")
+
+    # Recompensas
+    ax2.plot(steps_list, rewards_list, marker='o', color='tab:green')
+    ax2.set_xlabel("Paso")
+    ax2.set_ylabel("Recompensa")
+    ax2.set_title("Recompensas vs Pasos")
+
+    plt.tight_layout()
+    plt.show()
