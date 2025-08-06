@@ -75,6 +75,12 @@ class HydroThermalEnv(gym.Env):
         self.data_demanda = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=3)
         self.data_demanda = self.data_demanda.iloc[:,1:]
 
+        # Agregar columna con promedio de crónicas
+        self.data_biomasa["PROMEDIO"] = self.data_biomasa.mean(axis=1)
+        self.data_eolico["PROMEDIO"] = self.data_eolico.mean(axis=1)
+        self.data_solar["PROMEDIO"] = self.data_solar.mean(axis=1)
+        self.data_demanda["PROMEDIO"] = self.data_demanda.mean(axis=1)
+
         # Cargar datos de matrices hidrológicas con las probabilidades de transición entre estados
         self.data_matrices_hidrologicas = leer_archivo(f"Datos\\Claire\\matrices_sem.csv", sep=",", header=0)
         self.data_matrices_hidrologicas = self.data_matrices_hidrologicas.iloc[:, 1:] # Quito la columna de semanas
@@ -149,7 +155,7 @@ class HydroThermalEnv(gym.Env):
     
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
-        energias_demandas = self.data_demanda.iloc[:,self.cronica]
+        energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
             return energias_demandas.iloc[self.tiempo]
         else:
@@ -157,7 +163,7 @@ class HydroThermalEnv(gym.Env):
     
     def _gen_eolico(self):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
-        energias_eolico = self.data_eolico.iloc[:,self.cronica]
+        energias_eolico = self.data_eolico["PROMEDIO"]
         if self.tiempo < len(energias_eolico):
             return energias_eolico.iloc[self.tiempo]
         else:
@@ -165,7 +171,7 @@ class HydroThermalEnv(gym.Env):
 
     def _gen_solar(self):
         # Obtener generación solar para el tiempo actual según la cronica sorteada
-        energias_solar = self.data_solar.iloc[:,self.cronica]
+        energias_solar = self.data_solar["PROMEDIO"]
         if self.tiempo < len(energias_solar):
             return energias_solar.iloc[self.tiempo]
         else:
@@ -173,7 +179,7 @@ class HydroThermalEnv(gym.Env):
 
     def _gen_bio(self):
         # Obtener generación de biomasa para el tiempo actual según la cronica sorteada
-        energias_biomasa = self.data_biomasa.iloc[:,self.cronica]
+        energias_biomasa = self.data_biomasa["PROMEDIO"]
         if self.tiempo < len(energias_biomasa):
             return energias_biomasa.iloc[self.tiempo]
         else:
@@ -342,8 +348,8 @@ def train():
     model.save("a2c_hydro_thermal_claire")
 
 def save_trayectorias():
-    if os.path.exists("evaluacion_acciones_recompensas.csv"):
-        df_trayectorias = pd.read_csv("evaluacion_acciones_recompensas.csv")
+    if os.path.exists("trayectorias.csv"):
+        df_trayectorias = pd.read_csv("trayectorias.csv")
         df_trayectorias_copy = df_trayectorias.copy()
         tiempos = df_trayectorias["tiempo"]
         df_trayectorias_copy.drop("tiempo", axis=1,inplace=True)
