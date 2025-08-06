@@ -1,3 +1,4 @@
+# type: ignore
 from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
@@ -87,7 +88,7 @@ class HydroThermalEnv(gym.Env):
         self.matrices_hidrologicas = {}
         for i in range(self.data_matrices_hidrologicas.shape[0]):
             array_1d = self.data_matrices_hidrologicas.iloc[i, :].values
-            self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) # type: ignore
+            self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
         # Inicializar variables internas
         self.reset(seed=42)
@@ -114,7 +115,7 @@ class HydroThermalEnv(gym.Env):
         # retorna el estado inicial del estado hidrológico 0,1,2,3,4
         self.cronica = self._sortear_cronica_inicial()
         h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
-        return int(h0) # type: ignore
+        return int(h0) 
 
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
@@ -137,12 +138,12 @@ class HydroThermalEnv(gym.Env):
         estados_ini = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
         if self.tiempo == 51 or self.tiempo == 103:
-            estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  # type: ignore
+            estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  
         else:
             estados_fin = self.data_matriz_aportes_discreta.loc[(self.tiempo + 1) % 52] 
 
         coincidencias = (estados_ini == self.hidrologia_anterior) & (estados_fin == self.hidrologia)
-        columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] # type: ignore
+        columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] 
 
         if len(columnas_validas) == 0:
             raise ValueError("No hay coincidencias válidas para los estados hidrológicos actuales")
@@ -190,13 +191,13 @@ class HydroThermalEnv(gym.Env):
         return self._gen_eolico() + self._gen_solar() + self._gen_bio()
 
     def _gen_termico_bajo(self, demanda_residual):
-        if demanda_residual <= self.P_TERMICO_BAJO_MAX*168:
+        if demanda_residual <= self.P_TERMICO_BAJO_MAX * 168:
             return demanda_residual
         else:
             return self.P_TERMICO_BAJO_MAX
 
     def _gen_termico_alto(self, demanda_residual):
-        if demanda_residual <= self.P_TERMICO_ALTO_MAX*168:
+        if demanda_residual <= self.P_TERMICO_ALTO_MAX * 168:
             return demanda_residual
         else:
             raise ValueError("Demanda residual excede la capacidad del térmico alto")
@@ -261,7 +262,7 @@ class HydroThermalEnv(gym.Env):
         self.hidrologia = self._siguiente_hidrologia()
         aportes = self._aportes()
         vert = self.volumen
-        self.volumen = min(self.volumen - qt + aportes, self.V_CLAIRE_MAX) # type: ignore
+        self.volumen = min(self.volumen - qt + aportes, self.V_CLAIRE_MAX) 
         if (self.volumen>=self.V_CLAIRE_MAX): 
             vert=vert - qt + aportes -self.V_CLAIRE_MAX
         else:
@@ -316,9 +317,9 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 
     def observation(self, obs):
         # idem: si necesitas V_CLAIRE_MAX usa self.env.unwrapped.V_CLAIRE_MAX
-        v_norm = obs["volumen"] / HydroThermalEnv.V_CLAIRE_MAX # type: ignore
+        v_norm = obs["volumen"] / HydroThermalEnv.V_CLAIRE_MAX 
         h = obs["hidrologia"]
-        hidro_oh = np.zeros(HydroThermalEnv.N_HIDRO, dtype=np.float32) # type: ignore
+        hidro_oh = np.zeros(HydroThermalEnv.N_HIDRO, dtype=np.float32) 
 
         hidro_oh[h] = 1.0
         semana = obs["tiempo"] % HydroThermalEnv.T_MAX
@@ -333,7 +334,7 @@ def make_train_env():
     env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
     return env
 
-def train():
+def entrenar():
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
@@ -347,25 +348,7 @@ def train():
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
 
-def save_trayectorias():
-    if os.path.exists("trayectorias.csv"):
-        df_trayectorias = pd.read_csv("trayectorias.csv")
-        df_trayectorias_copy = df_trayectorias.copy()
-        tiempos = df_trayectorias["tiempo"]
-        df_trayectorias_copy.drop("tiempo", axis=1,inplace=True)
-
-        for i in range(df_trayectorias_copy.columns.shape[0]):
-            fig, ax = plt.subplots()
-            ax.plot(tiempos, df_trayectorias_copy.iloc[:, i])
-            ax.set_ylabel(f"{df_trayectorias_copy.columns[i]}")
-            ax.set_xlabel("Semanas")
-            nombre_figura = f"{df_trayectorias_copy.columns[i]}.png"
-            fig.savefig(os.path.join("figures", nombre_figura))
-            plt.close(fig)
-
-if __name__ == "__main__":
-    model_path = "a2c_hydro_thermal_claire"
-    
+def cargar_o_entrenar_modelo(model_path):
     # Verificar si el archivo del modelo existe
     if os.path.exists(f"{model_path}.zip"):
         try:
@@ -375,108 +358,91 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error al cargar el modelo: {e}")
             print("Entrenando un modelo nuevo...")
-            train()
+            entrenar()
             model = A2C.load(model_path)
     else:
         print("Archivo del modelo no encontrado, entrenando uno nuevo...")
-        train()
+        entrenar()
         model = A2C.load(model_path)
 
-    # Evaluar el modelo
-    # entorno de evaluación (no paralelo aquí, o se puede hacer otro vectorizado)
-    eval_env = make_train_env()
-    obs, info = eval_env.reset() # type: ignore
-    done = False
-    reward_sum = 0.0
+    return model
 
-    # Datos guardados en info
-    volumen_list = []
-    hidrologia_list = []
-    tiempo_list = []
-    turbinado_list = []
-    energia_turbinada_list = []
-    energia_eolica_list = []
-    energia_solar_list = []
-    energia_biomasa_list = []
-    energia_renovable_list = []
-    energia_termico_bajo_list = []
-    energia_termico_alto_list = []
-    ingreso_exportacion_list = []
-    costo_termico_list = []
+def evaluar_modelo(model, eval_env, num_pasos=51):
+    obs, info = eval_env.reset()
+    resultados = []
     
-    # Resultados del agente
-    actions_list = []
-    rewards_list = []
+    for _ in range(num_pasos):
+        action, _ = model.predict(obs)
+        obs, reward, done, _, info = eval_env.step(action)
+        
+        resultado_paso = info.copy()
+        resultado_paso["action"] = action[0] if hasattr(action, "__len__") else action
+        resultado_paso["reward"] = reward
+        resultados.append(resultado_paso)
 
-    print("Iniciando evaluación del modelo...")
-
-    # Evaluar el modelo en un episodio
-    while True:
-        action, _ = model.predict(obs) # type: ignore
-        obs, reward, done, _, info = eval_env.step(action) # type: ignore
-
-        reward_sum += reward # type: ignore
-
-        # Guardar datos
-        volumen_list.append(info["volumen"])
-        hidrologia_list.append(info["hidrologia"])
-        tiempo_list.append(info["tiempo"])
-        turbinado_list.append(info["turbinado"])
-        energia_turbinada_list.append(info["energia_turbinada"])
-        energia_eolica_list.append(info["energia_eolica"])
-        energia_solar_list.append(info["energia_solar"])
-        energia_biomasa_list.append(info["energia_biomasa"])
-        energia_renovable_list.append(info["energia_renovable"])
-        energia_termico_bajo_list.append(info["energia_termico_bajo"])
-        energia_termico_alto_list.append(info["energia_termico_alto"])
-        ingreso_exportacion_list.append(info["ingreso_exportacion"])
-        costo_termico_list.append(info["costo_termico"])
-
-        actions_list.append(action[0] if hasattr(action, "__len__") else action)
-        rewards_list.append(reward)
-
-        # evaluar como funciona hasta el primer año
-        if info["tiempo"] == 51:
+        if done:
             break
+            
+    return pd.DataFrame(resultados)
 
-    df_eval = pd.DataFrame({
-        "volumen": volumen_list, 
-        "hidrologia": hidrologia_list,
-        "tiempo": tiempo_list,
-        "volumen_turbinado": turbinado_list,
-        "energia_turbinada": energia_turbinada_list,
-        "energia_eolica": energia_eolica_list,
-        "energia_solar": energia_solar_list,
-        "energia_biomasa": energia_biomasa_list,
-        "energia_renovable": energia_renovable_list,
-        "energia_termico_barato": energia_termico_bajo_list,
-        "energia_termico_caro": energia_termico_alto_list,
-        "ingreso_exportacion": ingreso_exportacion_list,
-        "costo_termico": costo_termico_list,
-        "action": actions_list,
-        "reward": rewards_list
-    })
+def guardar_trayectorias(df_trayectorias, output_dir="figures"):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    df_eval.to_csv("trayectorias.csv", index=False)
-    print("Resultados guardados en trayectorias.csv")
+    df_trayectorias_copy = df_trayectorias.copy()
+    tiempos = df_trayectorias_copy.pop("tiempo")
 
-    print(f"Recompensa total en evaluación: {reward_sum:.2f}")
+    for col in df_trayectorias_copy.columns:
+        fig, ax = plt.subplots()
+        ax.plot(tiempos, df_trayectorias_copy[col])
+        ax.set_ylabel(col)
+        ax.set_xlabel("Semanas")
+        nombre_figura = f"{col}.png"
+        fig.savefig(os.path.join(output_dir, nombre_figura))
+        plt.close(fig)
 
-    save_trayectorias()
-
-    # Graficar acciones y recompensas
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
-
+def graficar_resumen_evaluacion(df_eval):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    
     # Acciones
-    ax1.plot(tiempo_list, actions_list, marker='o', color='tab:blue')
-    ax1.set_ylabel("Acción")
-    ax1.set_title("Acciones vs Pasos")
+    ax1.plot(df_eval["tiempo"], df_eval["action"], marker='o', linestyle='-', color='tab:blue')
+    ax1.set_xlabel("Paso (Semana)")
+    ax1.set_ylabel("Acción (Fracción a turbinar)")
+    ax1.set_title("Acciones durante la Evaluación")
+    ax1.grid(True)
 
     # Recompensas
-    ax2.plot(tiempo_list, rewards_list, marker='o', color='tab:green')
-    ax2.set_xlabel("Paso")
+    ax2.plot(df_eval["tiempo"], df_eval["reward"], marker='o', linestyle='-', color='tab:green')
+    ax2.set_xlabel("Paso (Semana)")
     ax2.set_ylabel("Recompensa")
-    ax2.set_title("Recompensas vs Pasos")
+    ax2.set_title("Recompensas durante la Evaluación")
+    ax2.grid(True)
 
     plt.tight_layout()
     plt.show()
+
+if __name__ == "__main__":
+    MODEL_PATH = "a2c_hydro_thermal_claire"
+    EVAL_CSV_PATH = "trayectorias.csv"
+
+    # Cargar o entrenar el modelo
+    model = cargar_o_entrenar_modelo(MODEL_PATH)
+
+    # Evaluar el modelo
+    print("Iniciando evaluación del modelo...")
+    eval_env = make_train_env()
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=51)
+
+    # Guardar y visualizar los resultados de la evaluación 
+    df_eval.to_csv(EVAL_CSV_PATH, index=False)
+    print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
+
+    total_reward = df_eval["reward"].sum()
+    print(f"Recompensa total en evaluación: {total_reward:.2f}")
+
+    # Guardar gráficos de cada variable de la trayectoria
+    guardar_trayectorias(df_eval)
+    print("Gráficos de trayectoria guardados en la carpeta 'figures'.")
+
+    # Mostrar gráfico resumen de acciones y recompensas
+    graficar_resumen_evaluacion(df_eval)
