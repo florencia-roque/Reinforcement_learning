@@ -184,13 +184,13 @@ class HydroThermalEnv(gym.Env):
         return self._gen_eolico() + self._gen_solar() + self._gen_bio()
 
     def _gen_termico_bajo(self, demanda_residual):
-        if demanda_residual <= self.P_TERMICO_BAJO_MAX:
+        if demanda_residual <= self.P_TERMICO_BAJO_MAX*168:
             return demanda_residual
         else:
             return self.P_TERMICO_BAJO_MAX
 
     def _gen_termico_alto(self, demanda_residual):
-        if demanda_residual <= self.P_TERMICO_ALTO_MAX:
+        if demanda_residual <= self.P_TERMICO_ALTO_MAX*168:
             return demanda_residual
         else:
             raise ValueError("Demanda residual excede la capacidad del térmico alto")
@@ -405,7 +405,7 @@ if __name__ == "__main__":
         energia_solar_list.append(info["energia_solar"])
         energia_biomasa_list.append(info["energia_biomasa"])
         energia_renovable_list.append(info["energia_renovable"])
-        energia_termico_bajo_list.append(info["energia_termico_barato"])
+        energia_termico_bajo_list.append(info["energia_termico_bajo"])
         energia_termico_alto_list.append(info["energia_termico_alto"])
         ingreso_exportacion_list.append(info["ingreso_exportacion"])
         costo_termico_list.append(info["costo_termico"])
