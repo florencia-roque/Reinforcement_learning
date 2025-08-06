@@ -341,6 +341,22 @@ def train():
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
 
+def save_trayectorias():
+    if os.path.exists("evaluacion_acciones_recompensas.csv"):
+        df_trayectorias = pd.read_csv("evaluacion_acciones_recompensas.csv")
+        df_trayectorias_copy = df_trayectorias.copy()
+        tiempos = df_trayectorias["tiempo"]
+        df_trayectorias_copy.drop("tiempo", axis=1,inplace=True)
+
+        for i in range(df_trayectorias_copy.columns.shape[0]):
+            fig, ax = plt.subplots()
+            ax.plot(tiempos, df_trayectorias_copy.iloc[:, i])
+            ax.set_ylabel(f"{df_trayectorias_copy.columns[i]}")
+            ax.set_xlabel("Semanas")
+            nombre_figura = f"{df_trayectorias_copy.columns[i]}.png"
+            fig.savefig(os.path.join("figures", nombre_figura))
+            plt.close(fig)
+
 if __name__ == "__main__":
     model_path = "a2c_hydro_thermal_claire"
     
@@ -428,17 +444,19 @@ if __name__ == "__main__":
         "energia_biomasa": energia_biomasa_list,
         "energia_renovable": energia_renovable_list,
         "energia_termico_barato": energia_termico_bajo_list,
-        "energia_termico_caro_list": energia_termico_alto_list,
+        "energia_termico_caro": energia_termico_alto_list,
         "ingreso_exportacion": ingreso_exportacion_list,
         "costo_termico": costo_termico_list,
         "action": actions_list,
         "reward": rewards_list
     })
 
-    df_eval.to_csv("evaluacion_acciones_recompensas.csv", index=False)
-    print("Resultados guardados en evaluacion_acciones_recompensas.csv")
+    df_eval.to_csv("trayectorias.csv", index=False)
+    print("Resultados guardados en trayectorias.csv")
 
     print(f"Recompensa total en evaluación: {reward_sum:.2f}")
+
+    save_trayectorias()
 
     # Graficar acciones y recompensas
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
