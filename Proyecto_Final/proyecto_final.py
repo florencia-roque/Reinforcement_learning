@@ -26,29 +26,30 @@ class HydroThermalEnv(gym.Env):
     T_MAX = 103
     N_HIDRO = 5
 
-    P_CLAIRE_MAX = 1541
-    P_SOLAR_MAX = 254
-    P_EOLICO_MAX = 1584.7
-    P_BIOMASA_MAX = 487.3
+    P_CLAIRE_MAX = 1541 # MW
+    P_SOLAR_MAX = 254 # MW
+    P_EOLICO_MAX = 1584.7 # MW
+    P_BIOMASA_MAX = 487.3 # MW
     # to-do: revisar si estos valores son correctos
-    P_TERMICO_BAJO_MAX = 500
-    P_TERMICO_ALTO_MAX = 5000
+    P_TERMICO_BAJO_MAX = 500 # MW
+    P_TERMICO_ALTO_MAX = 5000 # MW
 
-    Q_CLAIRE_MAX = 7081
+    Q_CLAIRE_MAX = 7081*3600/1e6 # hm3/h
 
-    V_CLAIRE_MIN = 0
-    V_CLAIRE_MAX = 11000
-    V0 = V_CLAIRE_MAX / 2
-    V_CLAIRE_TUR_MAX = 4275
+    V_CLAIRE_MIN = 0 # hm3
+    V_CLAIRE_MAX = 11000 # hm3
+    V0 = V_CLAIRE_MAX / 2 # hm3
+    V_CLAIRE_TUR_MAX = 4275 # hm3
 
-    K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX
+    K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 12.5  
-    COSTO_TERMICO_BAJO = 100  
-    COSTO_TERMICO_ALTO = 300  
+    VALOR_EXPORTACION = 12.5 # USD/MWh 
+    COSTO_TERMICO_BAJO = 100 # USD/MWh
+    COSTO_TERMICO_ALTO = 300 # USD/MWh
 
     def __init__(self):
+        self.vert = 0
         # Espacio de observación
         self.observation_space = spaces.Dict({
             "volumen": spaces.Box(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, shape=(), dtype=np.float32),
@@ -63,8 +64,10 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
         
-        # cargar matriz de aportes continuos
+        # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
+        # convertir a unidad hm3/h
+        self.data_matriz_aportes_claire = self.data_matriz_aportes_claire*3600/1e6
         
         # Cargar datos de energías renovables y demanda
         self.data_biomasa = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=0)
@@ -151,8 +154,8 @@ class HydroThermalEnv(gym.Env):
         año_sorteado = np.random.choice(columnas_validas)
 
         # Obtener valor en claire para fila2 y ese año
-        valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado]
-        return valor_claire
+        valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado] # hm3/h
+        return valor_claire*168
     
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
@@ -194,7 +197,7 @@ class HydroThermalEnv(gym.Env):
         if demanda_residual <= self.P_TERMICO_BAJO_MAX * 168:
             return demanda_residual
         else:
-            return self.P_TERMICO_BAJO_MAX
+            return self.P_TERMICO_BAJO_MAX*168
 
     def _gen_termico_alto(self, demanda_residual):
         if demanda_residual <= self.P_TERMICO_ALTO_MAX * 168:
@@ -203,10 +206,10 @@ class HydroThermalEnv(gym.Env):
             raise ValueError("Demanda residual excede la capacidad del térmico alto")
 
     def _despachar(self, qt):
-        demanda_residual = self._demanda() - self._gen_renovable() - (self.K_CLAIRE * qt)
-        energia_termico_bajo = 0
-        energia_termico_alto = 0
-        exportacion = 0
+        demanda_residual = self._demanda() - self._gen_renovable() - (self.K_CLAIRE * qt) # MWh
+        energia_termico_bajo = 0 # MWh
+        energia_termico_alto = 0 # MWh
+        exportacion = 0 # MWh
 
         if demanda_residual > 0:
             # Primero uso termico barato
@@ -223,8 +226,8 @@ class HydroThermalEnv(gym.Env):
             exportacion = -demanda_residual
 
         # Retornar ingresos por exportación y costos de generación térmica
-        ingreso_exportacion = exportacion * self.VALOR_EXPORTACION
-        costo_termico = energia_termico_bajo * self.COSTO_TERMICO_BAJO + energia_termico_alto * self.COSTO_TERMICO_ALTO
+        ingreso_exportacion = exportacion * self.VALOR_EXPORTACION # USD
+        costo_termico = energia_termico_bajo * self.COSTO_TERMICO_BAJO + energia_termico_alto * self.COSTO_TERMICO_ALTO # USD
         return ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto
     
     def step(self, action):
@@ -234,19 +237,20 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         frac = float(action[0])
-        qt = min(frac * self.V_CLAIRE_TUR_MAX, self.volumen)
+        qt = min(frac * self.V_CLAIRE_TUR_MAX, self.volumen) # hm3
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
         ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(qt)
 
         # recompensa: −costo_termico + ingreso_exportacion
-        reward = -costo_termico + ingreso_exportacion
+        reward = -costo_termico + ingreso_exportacion # USD
 
         info = {
             "volumen": self.volumen,
             "hidrologia": self.hidrologia,
             "tiempo": self.tiempo,
             "turbinado": qt,
+            "vertimiento": self.vert,
             "energia_turbinada": qt * self.K_CLAIRE,
             "energia_eolica": self._gen_eolico(),
             "energia_solar": self._gen_solar(),
@@ -256,21 +260,23 @@ class HydroThermalEnv(gym.Env):
             "energia_termico_alto": energia_termico_alto,
             "ingreso_exportacion": ingreso_exportacion,
             "costo_termico": costo_termico,
+            "demanda": self._demanda(),
+            "demanda_residual": self._demanda() - self._gen_renovable()
         }
 
         # dinámica: v ← v − q − d + a
         self.hidrologia = self._siguiente_hidrologia()
-        aportes = self._aportes()
-        vert = self.volumen
+        aportes = self._aportes() # hm3 de la semana (volumen)
+        self.vert = self.volumen
         self.volumen = min(self.volumen - qt + aportes, self.V_CLAIRE_MAX) 
-        if (self.volumen>=self.V_CLAIRE_MAX): 
-            vert=vert - qt + aportes -self.V_CLAIRE_MAX
+        if (self.volumen >= self.V_CLAIRE_MAX): 
+            self.vert = self.vert - qt + aportes - self.V_CLAIRE_MAX
         else:
-            vert=0
+            self.vert = 0
 
         self.tiempo += 1
         
-        info["aportes"] = aportes
+        info["aportes"] = aportes 
         info["volumen_siguiente"] = self.volumen
         info["hidrologia_siguiente"] = self.hidrologia
         info["tiempo_siguiente"] = self.tiempo
