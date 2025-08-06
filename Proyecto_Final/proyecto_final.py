@@ -30,21 +30,22 @@ class HydroThermalEnv(gym.Env):
     P_EOLICO_MAX = 1584.7
     P_BIOMASA_MAX = 487.3
     # to-do: revisar si estos valores son correctos
-    P_TERMICO_BAJO_MAX = 10000
-    P_TERMICO_ALTO_MAX = np.inf
+    P_TERMICO_BAJO_MAX = 500
+    P_TERMICO_ALTO_MAX = 5000
 
     Q_CLAIRE_MAX = 7081
 
     V_CLAIRE_MIN = 0
     V_CLAIRE_MAX = 11000
     V0 = V_CLAIRE_MAX / 2
+    V_CLAIRE_TUR_MAX = 4275
 
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX
 
     # to-do: revisar si estos valores son correctos
     VALOR_EXPORTACION = 12.5  
     COSTO_TERMICO_BAJO = 100  
-    COSTO_TERMICO_ALTO = 200  
+    COSTO_TERMICO_ALTO = 300  
 
     def __init__(self):
         # Espacio de observación
@@ -226,7 +227,7 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         frac = float(action[0])
-        qt = frac * self.volumen
+        qt = min(frac * self.V_CLAIRE_TUR_MAX, self.volumen)
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
         ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(qt)
@@ -253,7 +254,13 @@ class HydroThermalEnv(gym.Env):
         # dinámica: v ← v − q − d + a
         self.hidrologia = self._siguiente_hidrologia()
         aportes = self._aportes()
+        vert = self.volumen
         self.volumen = min(self.volumen - qt + aportes, self.V_CLAIRE_MAX) # type: ignore
+        if (self.volumen>=self.V_CLAIRE_MAX): 
+            vert=vert - qt + aportes -self.V_CLAIRE_MAX
+        else:
+            vert=0
+
         self.tiempo += 1
         
         info["aportes"] = aportes
@@ -360,12 +367,27 @@ if __name__ == "__main__":
     done = False
     reward_sum = 0.0
 
+    # Datos guardados en info
+    volumen_list = []
+    hidrologia_list = []
+    tiempo_list = []
+    turbinado_list = []
+    energia_turbinada_list = []
+    energia_eolica_list = []
+    energia_solar_list = []
+    energia_biomasa_list = []
+    energia_renovable_list = []
+    energia_termico_bajo_list = []
+    energia_termico_alto_list = []
+    ingreso_exportacion_list = []
+    costo_termico_list = []
+    
+    # Resultados del agente
     actions_list = []
     rewards_list = []
-    steps_list = []
 
     print("Iniciando evaluación del modelo...")
-    step = 0 
+
     # Evaluar el modelo en un episodio
     while True:
         action, _ = model.predict(obs) # type: ignore
@@ -373,19 +395,42 @@ if __name__ == "__main__":
 
         reward_sum += reward # type: ignore
 
-        # Guardar datos para graficar
-        steps_list.append(step)
+        # Guardar datos
+        volumen_list.append(info["volumen"])
+        hidrologia_list.append(info["hidrologia"])
+        tiempo_list.append(info["tiempo"])
+        turbinado_list.append(info["turbinado"])
+        energia_turbinada_list.append(info["energia_turbinada"])
+        energia_eolica_list.append(info["energia_eolica"])
+        energia_solar_list.append(info["energia_solar"])
+        energia_biomasa_list.append(info["energia_biomasa"])
+        energia_renovable_list.append(info["energia_renovable"])
+        energia_termico_bajo_list.append(info["energia_termico_barato"])
+        energia_termico_alto_list.append(info["energia_termico_alto"])
+        ingreso_exportacion_list.append(info["ingreso_exportacion"])
+        costo_termico_list.append(info["costo_termico"])
+
         actions_list.append(action[0] if hasattr(action, "__len__") else action)
         rewards_list.append(reward)
-
-        step += 1
 
         # evaluar como funciona hasta el primer año
         if info["tiempo"] == 51:
             break
 
     df_eval = pd.DataFrame({
-        "step": steps_list,
+        "volumen": volumen_list, 
+        "hidrologia": hidrologia_list,
+        "tiempo": tiempo_list,
+        "volumen_turbinado": turbinado_list,
+        "energia_turbinada": energia_turbinada_list,
+        "energia_eolica": energia_eolica_list,
+        "energia_solar": energia_solar_list,
+        "energia_biomasa": energia_biomasa_list,
+        "energia_renovable": energia_renovable_list,
+        "energia_termico_barato": energia_termico_bajo_list,
+        "energia_termico_caro_list": energia_termico_alto_list,
+        "ingreso_exportacion": ingreso_exportacion_list,
+        "costo_termico": costo_termico_list,
         "action": actions_list,
         "reward": rewards_list
     })
@@ -399,12 +444,12 @@ if __name__ == "__main__":
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
 
     # Acciones
-    ax1.plot(steps_list, actions_list, marker='o', color='tab:blue')
+    ax1.plot(tiempo_list, actions_list, marker='o', color='tab:blue')
     ax1.set_ylabel("Acción")
     ax1.set_title("Acciones vs Pasos")
 
     # Recompensas
-    ax2.plot(steps_list, rewards_list, marker='o', color='tab:green')
+    ax2.plot(tiempo_list, rewards_list, marker='o', color='tab:green')
     ax2.set_xlabel("Paso")
     ax2.set_ylabel("Recompensa")
     ax2.set_title("Recompensas vs Pasos")
