@@ -44,7 +44,7 @@ class HydroThermalEnv(gym.Env):
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 12.5 # USD/MWh 
+    VALOR_EXPORTACION = 0.0001 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
@@ -94,7 +94,7 @@ class HydroThermalEnv(gym.Env):
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
         # Inicializar variables internas
-        self.reset(seed=42)
+        self.reset()
 
     def reset(self, *, seed=None, options=None):
         if seed is not None:
@@ -263,7 +263,7 @@ class HydroThermalEnv(gym.Env):
             "demanda": self._demanda(),
             "demanda_residual": self._demanda() - self._gen_renovable()
         }
-
+        
         # dinámica: v ← v − q − d + a
         self.hidrologia = self._siguiente_hidrologia()
         aportes = self._aportes() # hm3 de la semana (volumen)
@@ -345,10 +345,10 @@ def entrenar():
     n_envs = 8
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
 
-    model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
+    model = A2C("MlpPolicy", vec_env, verbose=1)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 10000
+    total_episodes = 1000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps)
@@ -400,9 +400,10 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
 
     for col in df_trayectorias_copy.columns:
         fig, ax = plt.subplots()
-        ax.plot(tiempos, df_trayectorias_copy[col])
+        ax.plot(tiempos, df_trayectorias_copy[col], marker='o')
         ax.set_ylabel(col)
         ax.set_xlabel("Semanas")
+        ax.grid(True)
         nombre_figura = f"{col}.png"
         fig.savefig(os.path.join(output_dir, nombre_figura))
         plt.close(fig)
