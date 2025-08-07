@@ -5,7 +5,7 @@ import numpy as np
 # Levanto datos historicos de los aportes del proceso estocastico "Historico_Markov_2025_116c"
 rutaArchivo = 'Datos\Claire\datosProcHistorico2.xlt'
 df = pd.read_csv(rutaArchivo, sep=r'\s+', header=7, encoding='cp1252')
-df['APORTE-SALTO'] = df['APORTE-SALTO']/2
+df['APORTE-SALTO'] = df['APORTE-SALTO']
 
 df['APORTE-CLAIRE'] = df[['APORTE-BONETE', 'APORTE-PALMAR', 'APORTE-SALTO']].sum(axis=1)
 
