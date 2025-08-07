@@ -87,7 +87,7 @@ class HydroThermalEnv(gym.Env):
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 12.5 # USD/MWh 
+    VALOR_EXPORTACION = 0.0001 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
@@ -137,12 +137,9 @@ class HydroThermalEnv(gym.Env):
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
         # Inicializar variables internas
-        self.reset(seed=None)
+        self.reset()
 
-    def reset(self, *, seed=None, options=None):
-        if seed is not None:
-            np.random.seed(seed)
-        
+    def reset(self, seed=None, options=None):        
         self.volumen = self.V0
         self.tiempo = 0
         self.hidrologia = self._inicial_hidrologia()
@@ -307,7 +304,7 @@ class HydroThermalEnv(gym.Env):
             "ingreso_exportacion": ingreso_exportacion,
             "costo_termico": costo_termico
         }
-
+        
         # dinámica: v ← v − q − d + a
         self.hidrologia = self._siguiente_hidrologia()
         aportes = self._aportes() # hm3 de la semana (volumen)
@@ -396,7 +393,7 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=None)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 100000
+    total_episodes = 1000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
@@ -451,10 +448,10 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
 
     for col in df_trayectorias_copy.columns:
         fig, ax = plt.subplots()
-        ax.plot(tiempos, df_trayectorias_copy[col])
+        ax.plot(tiempos, df_trayectorias_copy[col], marker='o')
         ax.set_ylabel(col)
         ax.set_xlabel("Semanas")
-        ax.grid()
+        ax.grid(True)
         nombre_figura = f"{col}.png"
         fig.savefig(os.path.join(output_dir, nombre_figura))
         plt.close(fig)
