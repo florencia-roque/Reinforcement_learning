@@ -1,7 +1,6 @@
 # type: ignore
 from stable_baselines3 import A2C
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +9,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
 import os
-from pprint import pprint
+import time
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -348,7 +347,7 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 10000
+    total_episodes = 100_000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps)
@@ -430,6 +429,7 @@ def graficar_resumen_evaluacion(df_eval):
 if __name__ == "__main__":
     MODEL_PATH = "a2c_hydro_thermal_claire"
     EVAL_CSV_PATH = "trayectorias.csv"
+    start_time = time.time()
 
     # Cargar o entrenar el modelo
     model = cargar_o_entrenar_modelo(MODEL_PATH)
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_train_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=51)
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=103)
 
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
@@ -449,6 +449,11 @@ if __name__ == "__main__":
     # Guardar gráficos de cada variable de la trayectoria
     guardar_trayectorias(df_eval)
     print("Gráficos de trayectoria guardados en la carpeta 'figures'.")
+
+    end_time = time.time()
+    execution_time_seconds = end_time - start_time
+    execution_time_minutes = execution_time_seconds / 60
+    print(f"Tiempo de ejecución de main: {execution_time_minutes:.2f} minutos")
 
     # Mostrar gráfico resumen de acciones y recompensas
     graficar_resumen_evaluacion(df_eval)
