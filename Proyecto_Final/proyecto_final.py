@@ -429,6 +429,10 @@ def graficar_resumen_evaluacion(df_eval):
 if __name__ == "__main__":
     MODEL_PATH = "a2c_hydro_thermal_claire"
     EVAL_CSV_PATH = "trayectorias.csv"
+    EVAL_CSV_ENERGIAS_PATH = "energias.csv"
+    EVAL_CSV_ESTADOS_PATH = "estados.csv"
+    EVAL_CSV_RESULTADOS_AGENTE_PATH = "resultados_agente.csv"
+    EVAL_CSV_COSTOS_PATH = "costos.csv"
     start_time = time.time()
 
     # Cargar o entrenar el modelo
@@ -442,6 +446,26 @@ if __name__ == "__main__":
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
     print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
+
+    # Guardar energias en un mismo csv
+    df_energias = df_eval.iloc[:,5:12]
+    df_energias.to_csv(EVAL_CSV_ENERGIAS_PATH, index=False)
+    print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
+
+    # Guardar variables de estado en un mismo csv
+    df_estados = df_eval.iloc[:,:3]
+    df_estados.to_csv(EVAL_CSV_ESTADOS_PATH, index=False)
+    print(f"Resultados de variables de estado guardados en {EVAL_CSV_ESTADOS_PATH}")
+
+    # Guardar energias en un mismo csv
+    df_resultados_agente = df_eval.iloc[:,[3,-2,-1]]
+    df_resultados_agente.to_csv(EVAL_CSV_RESULTADOS_AGENTE_PATH, index=False)
+    print(f"Resultados del agente guardados en {EVAL_CSV_RESULTADOS_AGENTE_PATH}")
+
+    # Guardar energias en un mismo csv
+    df_costos = df_eval.iloc[:,12:14]
+    df_costos.to_csv(EVAL_CSV_COSTOS_PATH, index=False)
+    print(f"Resultados de costos guardados en {EVAL_CSV_COSTOS_PATH}")
 
     total_reward = df_eval["reward"].sum()
     print(f"Recompensa total en evaluación: {total_reward:.2f}")
