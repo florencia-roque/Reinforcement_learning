@@ -35,10 +35,10 @@ class HydroThermalEnv(gym.Env):
     P_TERMICO_BAJO_MAX = 500 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
-    Q_CLAIRE_MAX = 7081*3600/1e6 # hm3/h
+    Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 11000 # hm3
+    V_CLAIRE_MAX = 12500 # hm3
     V0 = V_CLAIRE_MAX / 2 # hm3
     V_CLAIRE_TUR_MAX = 4275 # hm3
 
