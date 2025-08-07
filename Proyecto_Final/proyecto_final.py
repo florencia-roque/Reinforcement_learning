@@ -11,6 +11,7 @@ from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
 import os
 from pprint import pprint
+import time
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -94,7 +95,7 @@ class HydroThermalEnv(gym.Env):
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
         # Inicializar variables internas
-        self.reset(seed=42)
+        self.reset(seed=None)
 
     def reset(self, *, seed=None, options=None):
         if seed is not None:
@@ -120,6 +121,7 @@ class HydroThermalEnv(gym.Env):
         h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
         return int(h0) 
 
+    # to do: revisar metodo
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
         self.hidrologia_anterior = self.hidrologia
@@ -258,10 +260,10 @@ class HydroThermalEnv(gym.Env):
             "energia_renovable": self._gen_renovable(),
             "energia_termico_bajo": energia_termico_bajo,
             "energia_termico_alto": energia_termico_alto,
-            "ingreso_exportacion": ingreso_exportacion,
-            "costo_termico": costo_termico,
             "demanda": self._demanda(),
-            "demanda_residual": self._demanda() - self._gen_renovable()
+            "demanda_residual": self._demanda() - self._gen_renovable(),
+            "ingreso_exportacion": ingreso_exportacion,
+            "costo_termico": costo_termico
         }
 
         # dinámica: v ← v − q − d + a
@@ -341,6 +343,8 @@ def make_train_env():
     return env
 
 def entrenar():
+    print("Comienzo de entrenamiento…")
+    t0 = time.perf_counter()
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
@@ -348,11 +352,14 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 10000
+    total_episodes = 100000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
+
+    dt = time.perf_counter() - t0
+    print(f"Entrenamiento completado en {dt:.2f} segundos")
 
 def cargar_o_entrenar_modelo(model_path):
     # Verificar si el archivo del modelo existe
@@ -403,6 +410,7 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
         ax.plot(tiempos, df_trayectorias_copy[col])
         ax.set_ylabel(col)
         ax.set_xlabel("Semanas")
+        ax.grid()
         nombre_figura = f"{col}.png"
         fig.savefig(os.path.join(output_dir, nombre_figura))
         plt.close(fig)
@@ -441,14 +449,14 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_train_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=51)
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=103)
 
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
     print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
 
     # Guardar energias en un mismo csv
-    df_energias = df_eval.iloc[:,5:12]
+    df_energias = df_eval.iloc[:,5:14]
     df_energias.to_csv(EVAL_CSV_ENERGIAS_PATH, index=False)
     print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
 
