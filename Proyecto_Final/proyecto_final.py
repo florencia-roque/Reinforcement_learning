@@ -51,7 +51,6 @@ class LivePlotCallback(BaseCallback):
                 self.fig.canvas.draw()
                 plt.pause(0.001)
 
-                print(f"[LivePlot] Episodio {len(x)} → recompensa {r:.2f}")
         return True
 
 
@@ -82,9 +81,10 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_MIN = 0 # hm3
     V_CLAIRE_MAX = 12500 # hm3
     V0 = V_CLAIRE_MAX / 2 # hm3
-    V_CLAIRE_TUR_MAX = 4275 # hm3
-
+    
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
+
+    V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
     VALOR_EXPORTACION = 0.0001 # USD/MWh 
@@ -299,10 +299,10 @@ class HydroThermalEnv(gym.Env):
             "energia_renovable": self._gen_renovable(),
             "energia_termico_bajo": energia_termico_bajo,
             "energia_termico_alto": energia_termico_alto,
-            "demanda": self._demanda(),
-            "demanda_residual": self._demanda() - self._gen_renovable(),
+            "costo_termico": costo_termico,
             "ingreso_exportacion": ingreso_exportacion,
-            "costo_termico": costo_termico
+            "demanda": self._demanda(),
+            "demanda_residual": self._demanda() - self._gen_renovable()
         }
         
         # dinámica: v ← v − q − d + a
@@ -497,7 +497,7 @@ if __name__ == "__main__":
     print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
 
     # Guardar energias en un mismo csv
-    df_energias = df_eval.iloc[:,5:14]
+    df_energias = df_eval.iloc[:,5:12]
     df_energias.to_csv(EVAL_CSV_ENERGIAS_PATH, index=False)
     print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
 
