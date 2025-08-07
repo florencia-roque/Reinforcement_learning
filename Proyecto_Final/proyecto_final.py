@@ -1,8 +1,12 @@
 # type: ignore
 from stable_baselines3 import A2C
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
+from stable_baselines3.common.callbacks import BaseCallback
 
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("TkAgg")
 import numpy as np
 import pandas as pd
 import gymnasium as gym
@@ -10,6 +14,45 @@ from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
 import os
 import time
+
+# Activa modo interactivo
+plt.ion()
+
+class LivePlotCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.episode_rewards = []
+        # Crea figura y línea UNA sola vez
+        self.fig, self.ax = plt.subplots()
+        self.ax.set_xlabel("Episodio")
+        self.ax.set_ylabel("Recompensa por episodio")
+        # Línea vacía
+        self.line, = self.ax.plot([], [], lw=2)
+        # Muestra la ventana no-bloqueante
+        self.fig.show()
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            if "episode" in info:
+                r = info["episode"]["r"]
+                self.episode_rewards.append(r)
+
+                # Actualiza datos
+                x = list(range(len(self.episode_rewards)))
+                y = self.episode_rewards
+                self.line.set_data(x, y)
+
+                # Ajusta ejes
+                self.ax.relim()
+                self.ax.autoscale_view()
+
+                # Dibuja y procesa eventos GUI
+                self.fig.canvas.draw()
+                plt.pause(0.001)
+
+        return True
+
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -33,17 +76,18 @@ class HydroThermalEnv(gym.Env):
     P_TERMICO_BAJO_MAX = 500 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
-    Q_CLAIRE_MAX = 7081*3600/1e6 # hm3/h
+    Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 11000 # hm3
+    V_CLAIRE_MAX = 12500 # hm3
     V0 = V_CLAIRE_MAX / 2 # hm3
-    V_CLAIRE_TUR_MAX = 4275 # hm3
-
+    
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
+    V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
+
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 12.5 # USD/MWh 
+    VALOR_EXPORTACION = 0.0001 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
@@ -93,12 +137,9 @@ class HydroThermalEnv(gym.Env):
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
         # Inicializar variables internas
-        self.reset(seed=42)
+        self.reset()
 
-    def reset(self, *, seed=None, options=None):
-        if seed is not None:
-            np.random.seed(seed)
-        
+    def reset(self, seed=None, options=None):        
         self.volumen = self.V0
         self.tiempo = 0
         self.hidrologia = self._inicial_hidrologia()
@@ -119,6 +160,7 @@ class HydroThermalEnv(gym.Env):
         h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
         return int(h0) 
 
+    # to do: revisar metodo
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
         self.hidrologia_anterior = self.hidrologia
@@ -257,12 +299,12 @@ class HydroThermalEnv(gym.Env):
             "energia_renovable": self._gen_renovable(),
             "energia_termico_bajo": energia_termico_bajo,
             "energia_termico_alto": energia_termico_alto,
-            "ingreso_exportacion": ingreso_exportacion,
             "costo_termico": costo_termico,
+            "ingreso_exportacion": ingreso_exportacion,
             "demanda": self._demanda(),
             "demanda_residual": self._demanda() - self._gen_renovable()
         }
-
+        
         # dinámica: v ← v − q − d + a
         self.hidrologia = self._siguiente_hidrologia()
         aportes = self._aportes() # hm3 de la semana (volumen)
@@ -340,18 +382,25 @@ def make_train_env():
     return env
 
 def entrenar():
+    print("Comienzo de entrenamiento...")
+    t0 = time.perf_counter()
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
+    vec_env = VecMonitor(vec_env)
 
-    model = A2C("MlpPolicy", vec_env, verbose=1, seed=42)
+    callback = LivePlotCallback()
+    model = A2C("MlpPolicy", vec_env, verbose=1, seed=None)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 100_000
+    total_episodes = 1000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
-    model.learn(total_timesteps=total_timesteps)
+    model.learn(total_timesteps=total_timesteps, callback=callback)
     model.save("a2c_hydro_thermal_claire")
+
+    dt = time.perf_counter() - t0
+    print(f"Entrenamiento completado en {dt:.2f} segundos")
 
 def cargar_o_entrenar_modelo(model_path):
     # Verificar si el archivo del modelo existe
@@ -399,9 +448,10 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
 
     for col in df_trayectorias_copy.columns:
         fig, ax = plt.subplots()
-        ax.plot(tiempos, df_trayectorias_copy[col])
+        ax.plot(tiempos, df_trayectorias_copy[col], marker='o')
         ax.set_ylabel(col)
         ax.set_xlabel("Semanas")
+        ax.grid(True)
         nombre_figura = f"{col}.png"
         fig.savefig(os.path.join(output_dir, nombre_figura))
         plt.close(fig)
