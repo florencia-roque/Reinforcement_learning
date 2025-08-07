@@ -1,17 +1,59 @@
 # type: ignore
 from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
+from stable_baselines3.common.callbacks import BaseCallback
 
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("TkAgg")
 import numpy as np
 import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
 import os
-from pprint import pprint
 import time
+
+# Activa modo interactivo
+plt.ion()
+
+class LivePlotCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.episode_rewards = []
+        # Crea figura y línea UNA sola vez
+        self.fig, self.ax = plt.subplots()
+        self.ax.set_xlabel("Episodio")
+        self.ax.set_ylabel("Recompensa por episodio")
+        # Línea vacía
+        self.line, = self.ax.plot([], [], lw=2)
+        # Muestra la ventana no-bloqueante
+        self.fig.show()
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            if "episode" in info:
+                r = info["episode"]["r"]
+                self.episode_rewards.append(r)
+
+                # Actualiza datos
+                x = list(range(len(self.episode_rewards)))
+                y = self.episode_rewards
+                self.line.set_data(x, y)
+
+                # Ajusta ejes
+                self.ax.relim()
+                self.ax.autoscale_view()
+
+                # Dibuja y procesa eventos GUI
+                self.fig.canvas.draw()
+                plt.pause(0.001)
+
+                print(f"[LivePlot] Episodio {len(x)} → recompensa {r:.2f}")
+        return True
+
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -340,19 +382,21 @@ def make_train_env():
     return env
 
 def entrenar():
-    print("Comienzo de entrenamiento…")
+    print("Comienzo de entrenamiento...")
     t0 = time.perf_counter()
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
+    vec_env = VecMonitor(vec_env)
 
-    model = A2C("MlpPolicy", vec_env, verbose=1)
+    callback = LivePlotCallback()
+    model = A2C("MlpPolicy", vec_env, verbose=1, seed=None)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 1000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
-    model.learn(total_timesteps=total_timesteps)
+    model.learn(total_timesteps=total_timesteps, callback=callback)
     model.save("a2c_hydro_thermal_claire")
 
     dt = time.perf_counter() - t0
