@@ -400,7 +400,8 @@ def entrenar():
     model.save("a2c_hydro_thermal_claire")
 
     dt = time.perf_counter() - t0
-    print(f"Entrenamiento completado en {dt:.2f} segundos")
+    dt /= 60  # convertir a minutos
+    print(f"Entrenamiento completado en {dt:.2f} minutos")
 
 def cargar_o_entrenar_modelo(model_path):
     # Verificar si el archivo del modelo existe
@@ -526,7 +527,7 @@ if __name__ == "__main__":
 
     end_time = time.time()
     execution_time_seconds = end_time - start_time
-    execution_time_minutes = execution_time_seconds / 60
+    execution_time_minutes /= 60
     print(f"Tiempo de ejecución de main: {execution_time_minutes:.2f} minutos")
 
     # Mostrar gráfico resumen de acciones y recompensas
