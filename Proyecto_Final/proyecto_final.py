@@ -508,22 +508,22 @@ if __name__ == "__main__":
     print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
 
     # Guardar energias en un mismo csv
-    df_energias = df_eval.iloc[:,5:12]
+    df_energias = df_eval.loc[:, ["energia_turbinada", "energia_eolica", "energia_solar", "energia_biomasa", "energia_renovable", "energia_termico_bajo", "energia_termico_alto", "demanda", "demanda_residual"]]
     df_energias.to_csv(EVAL_CSV_ENERGIAS_PATH, index=False)
     print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
 
     # Guardar variables de estado en un mismo csv
-    df_estados = df_eval.iloc[:,:3]
+    df_estados = df_eval.loc[:, ["volumen", "hidrologia", "tiempo", "aportes", "vertimiento", "turbinado"]]
     df_estados.to_csv(EVAL_CSV_ESTADOS_PATH, index=False)
     print(f"Resultados de variables de estado guardados en {EVAL_CSV_ESTADOS_PATH}")
 
     # Guardar energias en un mismo csv
-    df_resultados_agente = df_eval.iloc[:,[3,-2,-1]]
+    df_resultados_agente = df_eval.loc[:, ["action", "reward"]]
     df_resultados_agente.to_csv(EVAL_CSV_RESULTADOS_AGENTE_PATH, index=False)
     print(f"Resultados del agente guardados en {EVAL_CSV_RESULTADOS_AGENTE_PATH}")
 
     # Guardar energias en un mismo csv
-    df_costos = df_eval.iloc[:,12:14]
+    df_costos = df_eval.loc[:, ["costo_termico", "ingreso_exportacion"]]
     df_costos.to_csv(EVAL_CSV_COSTOS_PATH, index=False)
     print(f"Resultados de costos guardados en {EVAL_CSV_COSTOS_PATH}")
 
