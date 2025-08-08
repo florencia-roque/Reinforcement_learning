@@ -384,7 +384,7 @@ class OneHotFlattenObs(gym.ObservationWrapper):
 
         return np.concatenate(([v_norm], hidro_oh, time_oh), axis=0)
 
-def make_train_env():
+def make_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
     env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
@@ -395,11 +395,16 @@ def entrenar():
     t0 = time.perf_counter()
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
-    vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
+    vec_env = SubprocVecEnv([make_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C("MlpPolicy", vec_env, verbose=1, seed=None)
+    model = A2C(
+        "MlpPolicy", 
+        vec_env, 
+        verbose=2,
+        seed=None
+    )
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 5000
@@ -431,23 +436,42 @@ def cargar_o_entrenar_modelo(model_path):
 
     return model
 
-def evaluar_modelo(model, eval_env, num_pasos=51):
-    obs, info = eval_env.reset()
-    resultados = []
-    
-    for _ in range(num_pasos):
-        action, _ = model.predict(obs)
-        obs, reward, done, _, info = eval_env.step(action)
-        
-        resultado_paso = info.copy()
-        resultado_paso["action"] = action[0] if hasattr(action, "__len__") else action
-        resultado_paso["reward"] = reward
-        resultados.append(resultado_paso)
+def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
+    resultados_todos_episodios = []
+    recompensa_total = []
 
-        if done:
-            break
+    print(f"Evaluando durante {n_eval_episodes} episodios...")
+    for i in range(n_eval_episodes):
+        obs, info = eval_env.reset()
+        recompensa_episodio = 0
+        
+        for _ in range(num_pasos):
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, done, _, info = eval_env.step(action)
             
-    return pd.DataFrame(resultados)
+            resultado_paso = info.copy()
+            resultado_paso["action"] = action[0] if hasattr(action, "__len__") else action
+            resultado_paso["reward"] = reward
+            resultados_todos_episodios.append(resultado_paso)
+            recompensa_episodio += reward
+
+            if done:
+                break
+        
+        recompensa_total.append(recompensa_episodio)
+    
+    # Calcular y mostrar recompensa promedio por episodio
+    recompensa_promedio = np.mean(recompensa_total)
+    recompensa_std = np.std(recompensa_total)
+    print(f"Recompensa promedio por episodio: {recompensa_promedio:.2f} +/- {recompensa_std:.2f}")
+
+    # Convertir todo a un único DataFrame
+    df_all = pd.DataFrame(resultados_todos_episodios)
+
+    # Calcular el promedio por paso de tiempo
+    df_avg = df_all.groupby("tiempo").mean().reset_index()
+            
+    return df_avg
 
 def guardar_trayectorias(df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
@@ -500,8 +524,8 @@ if __name__ == "__main__":
 
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
-    eval_env = make_train_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=103)
+    eval_env = make_env()
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
 
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
