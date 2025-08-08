@@ -527,7 +527,7 @@ if __name__ == "__main__":
 
     end_time = time.time()
     execution_time_seconds = end_time - start_time
-    execution_time_minutes /= 60
+    execution_time_minutes = execution_time_seconds / 60
     print(f"Tiempo de ejecución de main: {execution_time_minutes:.2f} minutos")
 
     # Mostrar gráfico resumen de acciones y recompensas
