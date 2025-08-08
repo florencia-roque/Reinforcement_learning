@@ -92,7 +92,6 @@ class HydroThermalEnv(gym.Env):
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
     def __init__(self):
-        self.vert = 0
         # Espacio de observación
         self.observation_space = spaces.Dict({
             "volumen": spaces.Box(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, shape=(), dtype=np.float32),
@@ -176,7 +175,7 @@ class HydroThermalEnv(gym.Env):
         rotada = valores[1:] + [valores[0]]
         return pd.Series(rotada, index=fila.index)
 
-    def _aportes(self):
+    def _aporte(self):
         # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, 
         # sorteo una ocurrencia de aportes para el lago claire
         estados_ini = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
@@ -196,7 +195,7 @@ class HydroThermalEnv(gym.Env):
 
         # Obtener valor en claire para fila2 y ese año
         valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado] # hm3/h
-        return valor_claire*168
+        return valor_claire * 168
     
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
@@ -291,7 +290,6 @@ class HydroThermalEnv(gym.Env):
             "hidrologia": self.hidrologia,
             "tiempo": self.tiempo,
             "turbinado": qt,
-            "vertimiento": self.vert,
             "energia_turbinada": qt * self.K_CLAIRE,
             "energia_eolica": self._gen_eolico(),
             "energia_solar": self._gen_solar(),
@@ -307,20 +305,15 @@ class HydroThermalEnv(gym.Env):
         
         # dinámica: v ← v − q − d + a
         self.hidrologia = self._siguiente_hidrologia()
-        aportes = self._aportes() # hm3 de la semana (volumen)
-        self.vert = self.volumen
-        self.volumen = min(self.volumen - qt + aportes, self.V_CLAIRE_MAX) 
-        if (self.volumen >= self.V_CLAIRE_MAX): 
-            self.vert = self.vert - qt + aportes - self.V_CLAIRE_MAX
-        else:
-            self.vert = 0
-
         self.tiempo += 1
+
+        aporte_paso = self._aporte() # hm3 de la semana (volumen)
+        v_intermedio = self.volumen - qt + aporte_paso
+        self.vertimiento = max(v_intermedio - self.V_CLAIRE_MAX, 0) 
+        self.volumen = min(v_intermedio, self.V_CLAIRE_MAX) # hm3
         
-        info["aportes"] = aportes 
-        info["volumen_siguiente"] = self.volumen
-        info["hidrologia_siguiente"] = self.hidrologia
-        info["tiempo_siguiente"] = self.tiempo
+        info["aportes"] = aporte_paso
+        info["vertimiento"] = self.vertimiento
 
         done = (self.tiempo >= self.T_MAX)
         return self._get_obs(), reward, done, False, info
