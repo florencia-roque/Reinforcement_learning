@@ -104,7 +104,7 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 12.5 # USD/MWh 
+    VALOR_EXPORTACION = 1 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
@@ -168,16 +168,16 @@ class HydroThermalEnv(gym.Env):
         }
         return self._get_obs(), info
 
-    def _sortear_cronica_inicial(self):
-        return np.random.randint(self.data_matriz_aportes_discreta.shape[1])
+    # def _sortear_cronica_inicial(self):
+        # return np.random.randint(self.data_matriz_aportes_discreta.shape[1])
     
     def _inicial_hidrologia(self):
         # retorna el estado inicial del estado hidrológico 0,1,2,3,4
-        self.cronica = self._sortear_cronica_inicial()
-        h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
-        return int(h0) 
+        # self.cronica = self._sortear_cronica_inicial()
+        # h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
+        return np.int16(2)
 
-    # to do: revisar metodo
+    # to do: revisar método
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
         self.hidrologia_anterior = self.hidrologia
@@ -410,13 +410,14 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=1, seed=None)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 100000
+    total_episodes = 5000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
     model.save("a2c_hydro_thermal_claire")
 
-    dt = (time.perf_counter() - t0)/60
+    dt = time.perf_counter() - t0
+    dt /= 60  # convertir a minutos
     print(f"Entrenamiento completado en {dt:.2f} minutos")
 
 def cargar_o_entrenar_modelo(model_path):
@@ -495,11 +496,11 @@ def graficar_resumen_evaluacion(df_eval):
 
 if __name__ == "__main__":
     MODEL_PATH = "a2c_hydro_thermal_claire"
-    EVAL_CSV_PATH = "trayectorias.csv"
-    EVAL_CSV_ENERGIAS_PATH = "energias.csv"
-    EVAL_CSV_ESTADOS_PATH = "estados.csv"
-    EVAL_CSV_RESULTADOS_AGENTE_PATH = "resultados_agente.csv"
-    EVAL_CSV_COSTOS_PATH = "costos.csv"
+    EVAL_CSV_PATH = "salidas\\trayectorias.csv"
+    EVAL_CSV_ENERGIAS_PATH = "salidas\\energias.csv"
+    EVAL_CSV_ESTADOS_PATH = "salidas\\estados.csv"
+    EVAL_CSV_RESULTADOS_AGENTE_PATH = "salidas\\resultados_agente.csv"
+    EVAL_CSV_COSTOS_PATH = "salidas\\costos.csv"
     start_time = time.time()
 
     # Cargar o entrenar el modelo
