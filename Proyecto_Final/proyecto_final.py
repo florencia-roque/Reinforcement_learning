@@ -21,14 +21,18 @@ plt.ion()
 class LivePlotCallback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
+
         self.episode_rewards = []
-        # Crea figura y línea UNA sola vez
+        self.moving_avg_rewards = []
+
         self.fig, self.ax = plt.subplots()
         self.ax.set_xlabel("Episodio")
         self.ax.set_ylabel("Recompensa por episodio")
-        # Línea vacía
-        self.line, = self.ax.plot([], [], lw=2)
-        # Muestra la ventana no-bloqueante
+
+        self.line, = self.ax.plot([], [], lw=1, label="Reward")
+        self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)")
+
+        self.ax.legend()
         self.fig.show()
 
     def _on_step(self) -> bool:
@@ -38,10 +42,18 @@ class LivePlotCallback(BaseCallback):
                 r = info["episode"]["r"]
                 self.episode_rewards.append(r)
 
+                window = 100
+                if len(self.episode_rewards) >= window:
+                    avg = np.mean(self.episode_rewards[-window:])
+                else:
+                    avg = np.mean(self.episode_rewards)
+                self.moving_avg_rewards.append(avg)
+
                 # Actualiza datos
                 x = list(range(len(self.episode_rewards)))
                 y = self.episode_rewards
                 self.line.set_data(x, y)
+                self.line_avg.set_data(x, self.moving_avg_rewards)
 
                 # Ajusta ejes
                 self.ax.relim()
@@ -52,6 +64,11 @@ class LivePlotCallback(BaseCallback):
                 plt.pause(0.001)
 
         return True
+    
+    def _on_training_end(self) -> None:
+        # Desactiva el modo interactivo y muestra block hasta que cierres
+        plt.ioff()
+        plt.show()
 
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
