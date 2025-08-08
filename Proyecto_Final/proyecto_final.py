@@ -174,7 +174,7 @@ class HydroThermalEnv(gym.Env):
         # retorna el estado inicial del estado hidrológico 0,1,2,3,4
         # self.cronica = self._sortear_cronica_inicial()
         # h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
-        return np.int16(2)
+        return np.int64(2)
 
     # to do: revisar método
     def _siguiente_hidrologia(self):
@@ -320,14 +320,13 @@ class HydroThermalEnv(gym.Env):
             "demanda_residual": self._demanda() - self._gen_renovable()
         }
         
-        # dinámica: v ← v − q − d + a
+        # Actualizar variables internas
         self.hidrologia = self._siguiente_hidrologia()
-        self.tiempo += 1
-
         aporte_paso = self._aporte() # hm3 de la semana (volumen)
         v_intermedio = self.volumen - qt + aporte_paso
         self.vertimiento = max(v_intermedio - self.V_CLAIRE_MAX, 0) 
         self.volumen = min(v_intermedio, self.V_CLAIRE_MAX) # hm3
+        self.tiempo += 1
         
         info["aportes"] = aporte_paso
         info["vertimiento"] = self.vertimiento
