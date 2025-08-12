@@ -66,7 +66,7 @@ class LivePlotCallback(BaseCallback):
         return True
     
     def _on_training_end(self) -> None:
-        # Desactiva el modo interactivo y muestra block hasta que cierres
+        # Desactiva el modo interactivo y muestra block hasta que se cierre la ventana
         plt.ioff()
         plt.show()
 
@@ -159,7 +159,8 @@ class HydroThermalEnv(gym.Env):
         self.volumen = self.V0
         self.tiempo = 0
         self.hidrologia = self._inicial_hidrologia()
-        
+        self.hidrologia_anterior = self.hidrologia
+
         info = {
             "volumen_inicial": self.volumen,
             "hidrologia_inicial": self.hidrologia,
@@ -224,7 +225,7 @@ class HydroThermalEnv(gym.Env):
     
     def _gen_eolico(self):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
-        energias_eolico = self.data_eolico["PROMEDIO"]
+        energias_eolico = self.data_eolico["PROMEDIO"]*0.75
         if self.tiempo < len(energias_eolico):
             return energias_eolico.iloc[self.tiempo]
         else:
@@ -407,7 +408,7 @@ def entrenar():
     )
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 5000
+    total_episodes = 1000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
@@ -445,7 +446,7 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
         obs, info = eval_env.reset()
         recompensa_episodio = 0
         
-        for _ in range(num_pasos):
+        for _ in range(num_pasos+1):
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, done, _, info = eval_env.step(action)
             
