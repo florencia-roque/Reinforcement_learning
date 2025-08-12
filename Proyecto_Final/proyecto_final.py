@@ -1,19 +1,18 @@
 # type: ignore
 from stable_baselines3 import A2C
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use("TkAgg")
+import os
+import time
 import numpy as np
 import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
-import os
-import time
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("TkAgg")
 
 # Activa modo interactivo
 plt.ion()
@@ -126,7 +125,7 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
         # convertir a unidad hm3/h
-        self.data_matriz_aportes_claire = self.data_matriz_aportes_claire*3600/1e6
+        self.data_matriz_aportes_claire = self.data_matriz_aportes_claire * 3600 / 1e6
         
         # Cargar datos de energías renovables y demanda
         self.data_biomasa = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=0)
@@ -294,13 +293,14 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         frac = float(action[0])
-        qt = min(frac * self.V_CLAIRE_TUR_MAX, self.volumen) # hm3
+        qt_max_sem = min(self.V_CLAIRE_TUR_MAX, self.volumen)
+        qt = frac * qt_max_sem # hm3
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
         ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(qt)
 
         # recompensa: −costo_termico + ingreso_exportacion
-        reward = -costo_termico + ingreso_exportacion # USD
+        reward = (-costo_termico + ingreso_exportacion) / 1e6 # MUSD
 
         info = {
             "volumen": self.volumen,
@@ -372,13 +372,12 @@ class OneHotFlattenObs(gym.ObservationWrapper):
         )
 
     def observation(self, obs):
-        # idem: si necesitas V_CLAIRE_MAX usa self.env.unwrapped.V_CLAIRE_MAX
         v_norm = obs["volumen"] / HydroThermalEnv.V_CLAIRE_MAX 
         h = obs["hidrologia"]
         hidro_oh = np.zeros(HydroThermalEnv.N_HIDRO, dtype=np.float32) 
 
         hidro_oh[h] = 1.0
-        semana = obs["tiempo"] % HydroThermalEnv.T_MAX
+        semana = obs["tiempo"]
         time_oh = np.zeros(HydroThermalEnv.T_MAX + 1, dtype=np.float32)
         time_oh[semana] = 1.0
 
@@ -399,12 +398,7 @@ def entrenar():
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C(
-        "MlpPolicy", 
-        vec_env, 
-        verbose=2,
-        seed=None
-    )
+    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=64, learning_rate=3e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 5000
@@ -526,6 +520,7 @@ if __name__ == "__main__":
     print("Iniciando evaluación del modelo...")
     eval_env = make_env()
     df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
+    df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
