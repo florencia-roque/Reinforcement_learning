@@ -225,7 +225,7 @@ class HydroThermalEnv(gym.Env):
     
     def _gen_eolico(self):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
-        energias_eolico = self.data_eolico["PROMEDIO"]*0.75
+        energias_eolico = self.data_eolico["PROMEDIO"]
         if self.tiempo < len(energias_eolico):
             return energias_eolico.iloc[self.tiempo]
         else:
@@ -526,7 +526,7 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=1)
 
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
