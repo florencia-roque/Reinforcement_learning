@@ -95,8 +95,8 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500*10 # hm3
-    V0 = V_CLAIRE_MAX / 20 # hm3
+    V_CLAIRE_MAX = 12500*3 # hm3
+    V0 = V_CLAIRE_MAX / 6 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
@@ -404,7 +404,7 @@ def entrenar():
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=1, learning_rate=3e-4)
+    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=32, learning_rate=3e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 500
