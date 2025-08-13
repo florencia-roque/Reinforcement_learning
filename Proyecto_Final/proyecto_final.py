@@ -103,7 +103,7 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 1 # USD/MWh 
+    VALOR_EXPORTACION = 12.5 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
@@ -226,7 +226,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
         energias_eolico = self.data_eolico["PROMEDIO"]
         if self.tiempo < len(energias_eolico):
-            return energias_eolico.iloc[self.tiempo]
+            return energias_eolico.iloc[self.tiempo] * 0.75
         else:
             raise ValueError("Tiempo fuera de rango para datos eólicos")
 
@@ -399,7 +399,7 @@ def entrenar():
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=64, learning_rate=3e-4)
+    model = A2C("MlpPolicy", vec_env, verbose=1, n_steps=64, learning_rate=3e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 1000
@@ -520,7 +520,7 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=1)
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
     # Guardar y visualizar los resultados de la evaluación 
