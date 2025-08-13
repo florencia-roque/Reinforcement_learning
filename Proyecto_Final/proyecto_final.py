@@ -95,17 +95,17 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500 # hm3
-    V0 = V_CLAIRE_MAX / 2 # hm3
+    V_CLAIRE_MAX = 12500*10 # hm3
+    V0 = V_CLAIRE_MAX / 20 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 1 # USD/MWh 
+    VALOR_EXPORTACION = 0.0001 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
-    COSTO_TERMICO_ALTO = 300 # USD/MWh
+    COSTO_TERMICO_ALTO = 30000 # USD/MWh
 
     def __init__(self):
         # Espacio de observación
@@ -218,7 +218,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]
+            return energias_demandas.iloc[self.tiempo]*1.3
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -294,14 +294,13 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         frac = float(action[0])
-        qt_max_sem = min(self.V_CLAIRE_TUR_MAX, self.volumen)
-        qt = frac * qt_max_sem # hm3
+        print(frac)
+        qt = min(frac*self.V_CLAIRE_TUR_MAX, self.volumen) # hm3
+        #qt_max_sem = min(self.V_CLAIRE_TUR_MAX, self.volumen) # hm3
+        #qt = frac * qt_max_sem # hm3
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
         ingreso_exportacion, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(qt)
-
-        # recompensa: −costo_termico + ingreso_exportacion
-        reward = (-costo_termico + ingreso_exportacion) / 1e6 # MUSD
 
         info = {
             "volumen": self.volumen,
@@ -328,9 +327,15 @@ class HydroThermalEnv(gym.Env):
         self.vertimiento = max(v_intermedio - self.V_CLAIRE_MAX, 0) 
         self.volumen = min(v_intermedio, self.V_CLAIRE_MAX) # hm3
         self.tiempo += 1
+        self.costo_vertimiento = self.vertimiento*self.K_CLAIRE*self.COSTO_TERMICO_BAJO
+        self.costo_vertimiento = 0
         
         info["aportes"] = aporte_paso
         info["vertimiento"] = self.vertimiento
+        info["costo_vertimiento"] = self.costo_vertimiento
+
+        # recompensa: −costo_termico + ingreso_exportacion -costo_vertimiento
+        reward = (-costo_termico + ingreso_exportacion -self.costo_vertimiento) / 1e6 # MUSD
 
         done = (self.tiempo >= self.T_MAX)
         return self._get_obs(), reward, done, False, info
@@ -399,10 +404,10 @@ def entrenar():
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=64, learning_rate=3e-4)
+    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=1, learning_rate=3e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 1000
+    total_episodes = 500
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
