@@ -95,17 +95,17 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500 # hm3
-    V0 = V_CLAIRE_MAX / 2 # hm3
+    V_CLAIRE_MAX = 12500*3 # hm3
+    V0 = V_CLAIRE_MAX / 3 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 12.5 # USD/MWh 
+    VALOR_EXPORTACION = 1 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
-    COSTO_TERMICO_ALTO = 300 # USD/MWh
+    COSTO_TERMICO_ALTO = 3000 # USD/MWh
 
     def __init__(self):
         # Espacio de observación
@@ -220,7 +220,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]
+            return energias_demandas.iloc[self.tiempo]*1.3
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -406,14 +406,14 @@ def entrenar():
         "MlpPolicy", 
         vec_env, 
         verbose=1, 
-        n_steps=512, # ventana mas larga
-        gamma=0.995, # mira mas lejos
+        n_steps=208, # ventana mas larga
+        gamma=0.999, # mira mas lejos
         ent_coef=0.01, # evita colapso temprano a extremos
         learning_rate=3e-4
     )
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 3000
+    total_episodes = 2000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
