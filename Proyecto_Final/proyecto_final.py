@@ -18,57 +18,173 @@ matplotlib.use("TkAgg")
 plt.ion()
 
 class LivePlotCallback(BaseCallback):
-    def __init__(self, verbose=0):
+    def __init__(self, env_action_space=None, verbose=0, refresh_every=1, n_envs=None):
         super().__init__(verbose)
 
-        self.episode_rewards = []
-        self.moving_avg_rewards = []
+        self.refresh_every = refresh_every 
 
+        self._last_refresh_ep = 0
+
+        self.agg_x, self.agg_y = [], []
+
+        self.n_envs = n_envs  # puede ser None si querés que lo detecte al inicio
+
+        # Límites de acción (dinámicos si te pasan el espacio)
+        self.action_low  = float(env_action_space.low[0])  if env_action_space is not None else 0.0
+        self.action_high = float(env_action_space.high[0]) if env_action_space is not None else 1.0
+
+        self.actions_ep = None                      # -> lista de listas (uno por env)
+        self.mean_action_per_ep_by_env = None       # -> lista de listas (uno por env)
+
+        self.mean_action_per_ep_global = []         # -> una muestra por episodio (orden global)
+        self.episode_rewards = []                   # recompensa por episodio (global)
+        self.moving_avg_rewards = []
+        self.episode_count = 0                      # episodios cerrados (suma sobre todos los envs)
+
+        # ======= Figura 1: Recompensas =======
         self.fig, self.ax = plt.subplots()
         self.ax.set_xlabel("Episodio")
         self.ax.set_ylabel("Recompensa por episodio")
-
-        self.line, = self.ax.plot([], [], lw=1, label="Reward")
-        self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)")
-
+        self.line, = self.ax.plot([], [], lw=1, label="Reward", marker='o')
+        self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)", marker='o')
         self.ax.legend()
-        self.fig.show()
+        self.fig.show()      
+
+        # ======= Figura 2: Acción media por episodio =======
+        self.fig_act, self.ax_act = plt.subplots()
+        self.ax_act.set_xlabel("Episodio (global, orden de finalización)")
+        self.ax_act.set_ylabel("Acción media del episodio")
+        self.line_act, = self.ax_act.plot([], [], marker='o', linestyle='', lw=0, label="Action (mean per block)")
+        self.ax_act.legend()
+        self.fig_act.show()
+    
+    def _on_training_start(self) -> None:
+        # Detectar n_envs si no lo pasaste explícitamente
+        if self.n_envs is None:
+            try:
+                self.n_envs = self.training_env.num_envs
+            except Exception:
+                self.n_envs = 1  # fallback
+
+        # Inicializar buffers por entorno
+        self.actions_ep = [[] for _ in range(self.n_envs)]
+        self.mean_action_per_ep_by_env = [[] for _ in range(self.n_envs)]
+
+        print(f"[LivePlotCallback] Inicializado con {self.n_envs} entornos paralelos")
+
+    def _ensure_init(self):
+        # Detecta n_envs en el primer paso si no fue provisto
+        if self.n_envs is None:
+            # SB3: self.training_env.num_envs está disponible
+            if hasattr(self, "training_env") and hasattr(self.training_env, "num_envs"):
+                self.n_envs = int(self.training_env.num_envs)
+            else:
+                # Fallback: usar largo de infos
+                infos = self.locals.get("infos", [])
+                self.n_envs = len(infos) if isinstance(infos, (list, tuple)) else 1
+
+        if self.actions_ep is None:
+            self.actions_ep = [[] for _ in range(self.n_envs)]
+        if self.mean_action_per_ep_by_env is None:
+            self.mean_action_per_ep_by_env = [[] for _ in range(self.n_envs)]
 
     def _on_step(self) -> bool:
-        infos = self.locals.get("infos", [])
-        for info in infos:
-            if "episode" in info:
-                r = info["episode"]["r"]
-                self.episode_rewards.append(r)
+        self._ensure_init()
 
-                window = 100
-                if len(self.episode_rewards) >= window:
-                    avg = np.mean(self.episode_rewards[-window:])
-                else:
-                    avg = np.mean(self.episode_rewards)
-                self.moving_avg_rewards.append(avg)
+        actions = self.locals.get("actions", None)  # shape: (n_envs, act_dim)
+        infos   = self.locals.get("infos", [])      # list[dict] de largo n_envs
 
-                # Actualiza datos
-                x = list(range(len(self.episode_rewards)))
-                y = self.episode_rewards
-                self.line.set_data(x, y)
-                self.line_avg.set_data(x, self.moving_avg_rewards)
+        # ===== Guardar acción por env =====
+        if actions is not None:
+            # Acepta (n_envs, 1) o (n_envs,)
+            actions = np.asarray(actions)
+            if actions.ndim == 2 and actions.shape[1] >= 1:
+                vec = actions[:, 0]
+            else:
+                vec = np.ravel(actions)
 
-                # Ajusta ejes
-                self.ax.relim()
-                self.ax.autoscale_view()
+            # Clip dinámico
+            vec = np.clip(vec, self.action_low, self.action_high)
 
-                # Dibuja y procesa eventos GUI
-                self.fig.canvas.draw()
-                plt.pause(0.001)
+            # === Asegurar buffers por entorno ===
+            n_envs_step = int(vec.shape[0])
+            if not hasattr(self, "actions_ep") or self.actions_ep is None:
+                self.actions_ep = [[] for _ in range(n_envs_step)]
+            elif len(self.actions_ep) < n_envs_step:
+                # extender si faltan buffers
+                self.actions_ep.extend([[] for _ in range(n_envs_step - len(self.actions_ep))])
+            elif len(self.actions_ep) > n_envs_step:
+                # opcional: truncar si hay más buffers de los que llegaron
+                self.actions_ep = self.actions_ep[:n_envs_step]
 
+            # Append por entorno
+            for i in range(n_envs_step):
+                self.actions_ep[i].append(float(vec[i]))
+
+        # ===== Cierre de episodios por env =====
+        episodios_cerrados = 0
+        for i, info in enumerate(infos):
+            if isinstance(info, dict) and ("episode" in info):
+                # 1) Acción media del episodio del env i
+                last_ep_actions = self.actions_ep[i] if i < len(self.actions_ep) else []
+                mean_a = float(np.mean(last_ep_actions)) if last_ep_actions else np.nan
+                # by-env y global
+                self.mean_action_per_ep_by_env[i].append(mean_a)
+                self.mean_action_per_ep_global.append(mean_a)
+
+                print(f"close ep env={i}, mean_a={mean_a:.3f}, r={info['episode']['r']:.1f}")
+
+                # limpiar solo el buffer del env i si existe
+                if i < len(self.actions_ep):
+                    self.actions_ep[i] = []
+
+                # recompensa y contadores
+                self.episode_rewards.append(float(info["episode"]["r"]))
+                episodios_cerrados += 1
+            
+        self.episode_count += episodios_cerrados
+
+        # ====== Gráfico Recompensas (solo si hubo episodios cerrados) ======
+        if episodios_cerrados > 0:
+            avg = np.mean(self.episode_rewards[-100:])
+            # Replicar el promedio tantas veces como episodios cerraron en este step
+            self.moving_avg_rewards.extend([avg] * episodios_cerrados)
+
+            x = list(range(1, len(self.episode_rewards) + 1))
+            self.line.set_data(x, self.episode_rewards)
+            self.line_avg.set_data(x, self.moving_avg_rewards)
+            self.ax.relim(); self.ax.autoscale_view()
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+
+        # ====== Acción media (un punto por bloque: promedio del bloque) ======
+        if (self.episode_count - self._last_refresh_ep) >= self.refresh_every:
+            start = self._last_refresh_ep
+            end   = self.episode_count
+
+            # valores del bloque [start, end)
+            block_vals = self.mean_action_per_ep_global[start:end]
+            y = float(np.nanmean(block_vals)) if len(block_vals) > 0 else np.nan  # promedio del bloque
+            x = end  # posiciona el punto al final del bloque: 500, 1000, 1500, ...
+
+            self.agg_x.append(x)
+            self.agg_y.append(y)
+
+            # dibujar solo puntos agregados
+            self.line_act.set_data(self.agg_x, self.agg_y)
+            self.ax_act.relim(); self.ax_act.autoscale_view()
+            self.fig_act.canvas.draw(); self.fig_act.canvas.flush_events()
+
+            self._last_refresh_ep = end
+
+        # Flujo UI
+        plt.pause(0.001)
         return True
-    
+
     def _on_training_end(self) -> None:
         # Desactiva el modo interactivo y muestra block hasta que se cierre la ventana
         plt.ioff()
         plt.show()
-
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -401,19 +517,19 @@ def entrenar():
     vec_env = SubprocVecEnv([make_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
 
-    callback = LivePlotCallback()
+    callback = LivePlotCallback(env_action_space=vec_env.action_space, refresh_every=500, n_envs=n_envs)
     model = A2C(
         "MlpPolicy", 
         vec_env, 
         verbose=1, 
-        n_steps=208, # ventana mas larga
-        gamma=0.999, # mira mas lejos
+        n_steps=104, # ventana mas larga
+        gamma=0.995, # mira mas lejos
         ent_coef=0.01, # evita colapso temprano a extremos
         learning_rate=3e-4
     )
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 2000
+    total_episodes = 80000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
