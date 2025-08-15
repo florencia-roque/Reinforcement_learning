@@ -10,6 +10,7 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
+from collections import Counter
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("TkAgg")
@@ -21,9 +22,25 @@ class LivePlotCallback(BaseCallback):
     def __init__(self, env_action_space=None, verbose=0, refresh_every=1, n_envs=None):
         super().__init__(verbose)
 
-        self.refresh_every = refresh_every 
+        # ---- MODA por episodio y por bloque ----
+        self.episode_modes = []   # moda por episodio (en orden global)
+        self.block_x = []         
+        self.block_y = []         # y = acción modal del bloque
 
-        self._last_refresh_ep = 0
+        # Figura para la moda por BLOQUES de 12 episodios
+        self.fig_mode, self.ax_mode = plt.subplots()
+        self.ax_mode.set_xlabel("Episodio (bloques de 12)")
+        self.ax_mode.set_ylabel("Acción modal del bloque")
+        self.line_mode, = self.ax_mode.plot([], [], marker='o', linestyle='', lw=0, label="Moda(12 eps)")
+        self.ax_mode.legend()
+        self.fig_mode.show()
+
+        if hasattr(self, "n_actions") and self.n_actions:
+            self.ax_mode.set_yticks(range(self.n_actions))
+            self.ax_mode.set_ylim(-0.5, self.n_actions - 0.5)
+
+
+        self.refresh_every = refresh_every 
 
         self.agg_x, self.agg_y = [], []
 
@@ -34,9 +51,7 @@ class LivePlotCallback(BaseCallback):
         self.action_high = float(env_action_space.high[0]) if env_action_space is not None else 1.0
 
         self.actions_ep = None                      # -> lista de listas (uno por env)
-        self.mean_action_per_ep_by_env = None       # -> lista de listas (uno por env)
 
-        self.mean_action_per_ep_global = []         # -> una muestra por episodio (orden global)
         self.episode_rewards = []                   # recompensa por episodio (global)
         self.moving_avg_rewards = []
         self.episode_count = 0                      # episodios cerrados (suma sobre todos los envs)
@@ -49,26 +64,27 @@ class LivePlotCallback(BaseCallback):
         self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)", marker='o')
         self.ax.legend()
         self.fig.show()      
-
-        # ======= Figura 2: Acción media por episodio =======
-        self.fig_act, self.ax_act = plt.subplots()
-        self.ax_act.set_xlabel("Episodio (global, orden de finalización)")
-        self.ax_act.set_ylabel("Acción media del episodio")
-        self.line_act, = self.ax_act.plot([], [], marker='o', linestyle='', lw=0, label="Action (mean per block)")
-        self.ax_act.legend()
-        self.fig_act.show()
     
     def _on_training_start(self) -> None:
+        # Detectar n_actions si el env es discreto
+        try:
+            self.n_actions = int(self.training_env.action_space.n)
+        except Exception:
+            self.n_actions = None
+
+        if self.n_actions:
+            self.ax_mode.set_yticks(range(self.n_actions))
+            self.ax_mode.set_ylim(-0.5, self.n_actions - 0.5)
+
         # Detectar n_envs si no lo pasaste explícitamente
         if self.n_envs is None:
             try:
                 self.n_envs = self.training_env.num_envs
             except Exception:
-                self.n_envs = 1  # fallback
+                self.n_envs = 1
 
         # Inicializar buffers por entorno
         self.actions_ep = [[] for _ in range(self.n_envs)]
-        self.mean_action_per_ep_by_env = [[] for _ in range(self.n_envs)]
 
         print(f"[LivePlotCallback] Inicializado con {self.n_envs} entornos paralelos")
 
@@ -85,99 +101,82 @@ class LivePlotCallback(BaseCallback):
 
         if self.actions_ep is None:
             self.actions_ep = [[] for _ in range(self.n_envs)]
-        if self.mean_action_per_ep_by_env is None:
-            self.mean_action_per_ep_by_env = [[] for _ in range(self.n_envs)]
+        
 
     def _on_step(self) -> bool:
         self._ensure_init()
 
-        actions = self.locals.get("actions", None)  # shape: (n_envs, act_dim)
-        infos   = self.locals.get("infos", [])      # list[dict] de largo n_envs
+        actions = self.locals.get("actions", None)  # (n_envs,) o (n_envs,1)
+        infos   = self.locals.get("infos", [])
 
-        # ===== Guardar acción por env =====
+        # ===== Guardar acciones (discretas) por env =====
         if actions is not None:
-            # Acepta (n_envs, 1) o (n_envs,)
-            actions = np.asarray(actions)
-            if actions.ndim == 2 and actions.shape[1] >= 1:
-                vec = actions[:, 0]
-            else:
-                vec = np.ravel(actions)
+            vec = np.asarray(actions).ravel()
+            # Si vienen como float, casteamos a int
+            vec = vec.astype(int)
 
-            # Clip dinámico
-            vec = np.clip(vec, self.action_low, self.action_high)
-
-            # === Asegurar buffers por entorno ===
             n_envs_step = int(vec.shape[0])
-            if not hasattr(self, "actions_ep") or self.actions_ep is None:
+            if self.actions_ep is None or len(self.actions_ep) != n_envs_step:
                 self.actions_ep = [[] for _ in range(n_envs_step)]
-            elif len(self.actions_ep) < n_envs_step:
-                # extender si faltan buffers
-                self.actions_ep.extend([[] for _ in range(n_envs_step - len(self.actions_ep))])
-            elif len(self.actions_ep) > n_envs_step:
-                # opcional: truncar si hay más buffers de los que llegaron
-                self.actions_ep = self.actions_ep[:n_envs_step]
 
-            # Append por entorno
             for i in range(n_envs_step):
-                self.actions_ep[i].append(float(vec[i]))
+                self.actions_ep[i].append(int(vec[i]))
 
-        # ===== Cierre de episodios por env =====
-        episodios_cerrados = 0
-        for i, info in enumerate(infos):
-            if isinstance(info, dict) and ("episode" in info):
-                # 1) Acción media del episodio del env i
-                last_ep_actions = self.actions_ep[i] if i < len(self.actions_ep) else []
-                mean_a = float(np.mean(last_ep_actions)) if last_ep_actions else np.nan
-                # by-env y global
-                self.mean_action_per_ep_by_env[i].append(mean_a)
-                self.mean_action_per_ep_global.append(mean_a)
+            episodios_cerrados = 0
+            for i, info in enumerate(infos):
+                if isinstance(info, dict) and ("episode" in info):
+                    # --- Moda del episodio del env i ---
+                    last_ep_actions = self.actions_ep[i] if i < len(self.actions_ep) else []
+                    if last_ep_actions:
+                        ep_mode = Counter(last_ep_actions).most_common(1)[0][0]
+                    else:
+                        ep_mode = np.nan
+                    self.episode_modes.append(ep_mode)
 
-                print(f"close ep env={i}, mean_a={mean_a:.3f}, r={info['episode']['r']:.1f}")
+                    # limpiar buffer del env que cerró
+                    if i < len(self.actions_ep):
+                        self.actions_ep[i] = []
 
-                # limpiar solo el buffer del env i si existe
-                if i < len(self.actions_ep):
-                    self.actions_ep[i] = []
+                    # métrica de recompensa y contador
+                    self.episode_rewards.append(float(info["episode"]["r"]))
+                    episodios_cerrados += 1
 
-                # recompensa y contadores
-                self.episode_rewards.append(float(info["episode"]["r"]))
-                episodios_cerrados += 1
-            
-        self.episode_count += episodios_cerrados
+            self.episode_count += episodios_cerrados
 
-        # ====== Gráfico Recompensas (solo si hubo episodios cerrados) ======
-        if episodios_cerrados > 0:
-            avg = np.mean(self.episode_rewards[-100:])
-            # Replicar el promedio tantas veces como episodios cerraron en este step
-            self.moving_avg_rewards.extend([avg] * episodios_cerrados)
+            # === actualizar gráfico de recompensas si cerraron episodios ===
+            if episodios_cerrados > 0:
+                avg = np.mean(self.episode_rewards[-100:])
+                self.moving_avg_rewards.extend([avg] * episodios_cerrados)
+                x = list(range(1, len(self.episode_rewards) + 1))
+                self.line.set_data(x, self.episode_rewards)
+                self.line_avg.set_data(x, self.moving_avg_rewards)
+                self.ax.relim(); self.ax.autoscale_view()
+                self.fig.canvas.draw(); self.fig.canvas.flush_events()
 
-            x = list(range(1, len(self.episode_rewards) + 1))
-            self.line.set_data(x, self.episode_rewards)
-            self.line_avg.set_data(x, self.moving_avg_rewards)
-            self.ax.relim(); self.ax.autoscale_view()
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
+        # === Moda por bloques de 12 episodios (robusto a n_envs > 1) ===
+        bloques_hechos = len(self.block_x)
+        bloques_disponibles = len(self.episode_modes) // 12
 
-        # ====== Acción media (un punto por bloque: promedio del bloque) ======
-        if (self.episode_count - self._last_refresh_ep) >= self.refresh_every:
-            start = self._last_refresh_ep
-            end   = self.episode_count
+        while bloques_hechos < bloques_disponibles:
+            end = (bloques_hechos + 1) * 12
+            bloque = self.episode_modes[end-12:end]
+            bloque_valid = [int(a) for a in bloque if not (isinstance(a, float) and np.isnan(a))]
+            block_mode = Counter(bloque_valid).most_common(1)[0][0] if bloque_valid else np.nan
 
-            # valores del bloque [start, end)
-            block_vals = self.mean_action_per_ep_global[start:end]
-            y = float(np.nanmean(block_vals)) if len(block_vals) > 0 else np.nan  # promedio del bloque
-            x = end  # posiciona el punto al final del bloque: 500, 1000, 1500, ...
+            self.block_x.append(end)     
+            self.block_y.append(block_mode)
 
-            self.agg_x.append(x)
-            self.agg_y.append(y)
+            self.line_mode.set_data(self.block_x, self.block_y)
 
-            # dibujar solo puntos agregados
-            self.line_act.set_data(self.agg_x, self.agg_y)
-            self.ax_act.relim(); self.ax_act.autoscale_view()
-            self.fig_act.canvas.draw(); self.fig_act.canvas.flush_events()
+            if getattr(self, "n_actions", None):
+                self.ax_mode.set_yticks(range(self.n_actions))
+                self.ax_mode.set_ylim(-0.5, self.n_actions - 0.5)
 
-            self._last_refresh_ep = end
+            self.ax_mode.relim(); self.ax_mode.autoscale_view(scaley=False)
+            self.fig_mode.canvas.draw(); self.fig_mode.canvas.flush_events()
 
-        # Flujo UI
+            bloques_hechos += 1
+
         plt.pause(0.001)
         return True
 
@@ -232,8 +231,8 @@ class HydroThermalEnv(gym.Env):
         })
         
         # Fracción a turbinar del volumen del embalse
-        # El agente puede turbinar entre 0 y 1 (100% del volumen)
-        self.action_space = spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32)
+        # El agente puede turbinar entre los niveles 0,1,2,3,4 y 5
+        self.action_space = spaces.Discrete(5)
 
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
@@ -406,17 +405,28 @@ class HydroThermalEnv(gym.Env):
         return ingreso_exportacion, energia_exportada, costo_termico, energia_termico_bajo, energia_termico_alto
     
     def step(self, action):
-        # Validar que la acción esté en el espacio válido
-        action = np.array(action, dtype=np.float32).reshape(1,)
-        assert self.action_space.contains(action), f"Acción inválida: {action}. Debe estar en {self.action_space}"
+        # === Normalizar acción a entero escalar 0..n-1 ===
+        if isinstance(action, (np.ndarray, list, tuple)):
+            # e.g. [0.], [2.0] → 0, 2
+            action = int(np.asarray(action).squeeze().item())
+        else:
+            action = int(action)
+
+        # (opcional) clamp defensivo
+        if hasattr(self.action_space, "n"):
+            action = int(np.clip(action, 0, self.action_space.n - 1))
+
+        assert self.action_space.contains(action), f"Acción inválida: {action}"
 
         # Volumen a turbinar
-        frac = float(action[0])
-        qt_max_sem = min(self.V_CLAIRE_TUR_MAX, self.volumen)
-        qt = frac * qt_max_sem # hm3
+        # acción recibida como entero 0..4
+        frac = action / 4   # mapea a 0.0, 0.25, 0.5, 0.75, 1.0
+
+        v_max = min(self.volumen, self.V_CLAIRE_TUR_MAX) #hm3
+        v_turb = frac * v_max #hm3
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
-        ingreso_exportacion, energia_exportada, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(qt)
+        ingreso_exportacion, energia_exportada, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(v_turb)
 
         # recompensa: −costo_termico + ingreso_exportacion
         reward = (-costo_termico + ingreso_exportacion) / 1e6 # MUSD
@@ -425,8 +435,8 @@ class HydroThermalEnv(gym.Env):
             "volumen": self.volumen,
             "hidrologia": self.hidrologia,
             "tiempo": self.tiempo,
-            "turbinado": qt,
-            "energia_turbinada": qt * self.K_CLAIRE,
+            "turbinado": v_turb,
+            "energia_turbinada": v_turb * self.K_CLAIRE,
             "energia_eolica": self._gen_eolico(),
             "energia_solar": self._gen_solar(),
             "energia_biomasa": self._gen_bio(),
@@ -443,7 +453,7 @@ class HydroThermalEnv(gym.Env):
         # Actualizar variables internas
         self.hidrologia = self._siguiente_hidrologia()
         aporte_paso = self._aporte() # hm3 de la semana (volumen)
-        v_intermedio = self.volumen - qt + aporte_paso
+        v_intermedio = self.volumen - v_turb + aporte_paso
         self.vertimiento = max(v_intermedio - self.V_CLAIRE_MAX, 0) 
         self.volumen = min(v_intermedio, self.V_CLAIRE_MAX) # hm3
         self.tiempo += 1
@@ -517,7 +527,6 @@ def entrenar():
     vec_env = SubprocVecEnv([make_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
 
-    callback = LivePlotCallback(env_action_space=vec_env.action_space, refresh_every=500, n_envs=n_envs)
     model = A2C(
         "MlpPolicy", 
         vec_env, 
@@ -528,8 +537,10 @@ def entrenar():
         learning_rate=3e-4
     )
 
+    callback = LivePlotCallback(verbose=0, n_envs=n_envs)
+
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 80000
+    total_episodes = 2000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
@@ -572,7 +583,7 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
             obs, reward, done, _, info = eval_env.step(action)
             
             resultado_paso = info.copy()
-            resultado_paso["action"] = action[0] if hasattr(action, "__len__") else action
+            resultado_paso["action"] = action
             resultado_paso["reward"] = reward
             resultados_todos_episodios.append(resultado_paso)
             recompensa_episodio += reward
