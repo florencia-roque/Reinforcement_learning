@@ -29,9 +29,8 @@ class LivePlotCallback(BaseCallback):
 
         self.n_envs = n_envs  # puede ser None si querés que lo detecte al inicio
 
-        # Límites de acción (dinámicos si te pasan el espacio)
-        self.action_low  = float(env_action_space.low[0])  if env_action_space is not None else 0.0
-        self.action_high = float(env_action_space.high[0]) if env_action_space is not None else 1.0
+        self.action_low  = 0
+        self.action_high = env_action_space.n - 1
 
         self.actions_ep = None                      # -> lista de listas (uno por env)
         self.mean_action_per_ep_by_env = None       # -> lista de listas (uno por env)
@@ -502,10 +501,27 @@ class OneHotFlattenObs(gym.ObservationWrapper):
         time_oh[semana] = 1.0
 
         return np.concatenate(([v_norm], hidro_oh, time_oh), axis=0)
+    
+    
+
+class DiscreteActionWrapper(gym.ActionWrapper):
+    """Convierte el espacio de acción a 5 acciones discretas."""
+    def __init__(self, env):
+        super().__init__(env)
+        self.levels = np.array([0.0, 0.25, 0.5, 0.75, 1.0], dtype=np.float32)
+        self.action_space = spaces.Discrete(len(self.levels))
+
+    def action(self, act):
+        # Aquí puedes mapear cada acción discreta a un valor original si el entorno lo necesita
+        # Por ejemplo, si el env original espera un float 0-1, podemos mapear 0->0.0, 4->1.0
+        return act / 4.0  # Normaliza de 0 a 1 si es necesario
+        
+
 
 def make_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
+    env = DiscreteActionWrapper(env)
     env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
     return env
 
@@ -522,17 +538,17 @@ def entrenar():
         "MlpPolicy", 
         vec_env, 
         verbose=1, 
-        n_steps=104, # ventana mas larga
-        gamma=0.995, # mira mas lejos
+        n_steps=27, # ventana mas larga
+        gamma=0.999, # mira mas lejos
         ent_coef=0.01, # evita colapso temprano a extremos
         learning_rate=3e-4
     )
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 80000
+    total_episodes = 2000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
-    model.learn(total_timesteps=total_timesteps, callback=callback)
+    model.learn(total_timesteps=total_timesteps)
     model.save("a2c_hydro_thermal_claire")
 
     dt = time.perf_counter() - t0
@@ -572,7 +588,7 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
             obs, reward, done, _, info = eval_env.step(action)
             
             resultado_paso = info.copy()
-            resultado_paso["action"] = action[0] if hasattr(action, "__len__") else action
+            resultado_paso["action"] = int(action)
             resultado_paso["reward"] = reward
             resultados_todos_episodios.append(resultado_paso)
             recompensa_episodio += reward
