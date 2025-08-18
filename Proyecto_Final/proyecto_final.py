@@ -10,7 +10,7 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
-from collections import Counter
+from scipy.stats import mode
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("TkAgg")
@@ -21,24 +21,6 @@ plt.ion()
 class LivePlotCallback(BaseCallback):
     def __init__(self, env_action_space=None, verbose=0, refresh_every=1, n_envs=None):
         super().__init__(verbose)
-
-        # ---- MODA por episodio y por bloque ----
-        self.episode_modes = []   # moda por episodio (en orden global)
-        self.block_x = []         
-        self.block_y = []         # y = acción modal del bloque
-
-        # Figura para la moda por BLOQUES de 12 episodios
-        self.fig_mode, self.ax_mode = plt.subplots()
-        self.ax_mode.set_xlabel("Episodio (bloques de 12)")
-        self.ax_mode.set_ylabel("Acción modal del bloque")
-        self.line_mode, = self.ax_mode.plot([], [], marker='o', linestyle='', lw=0, label="Moda(12 eps)")
-        self.ax_mode.legend()
-        self.fig_mode.show()
-
-        if hasattr(self, "n_actions") and self.n_actions:
-            self.ax_mode.set_yticks(range(self.n_actions))
-            self.ax_mode.set_ylim(-0.5, self.n_actions - 0.5)
-
 
         self.refresh_every = refresh_every 
 
@@ -64,6 +46,19 @@ class LivePlotCallback(BaseCallback):
         self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)", marker='o')
         self.ax.legend()
         self.fig.show()      
+
+        # ======= Figura 2: Moda de acciones entre entornos (por paso) =======
+        self.fig_mode, self.ax_mode = plt.subplots()
+        self.ax_mode.set_xlabel("Paso de entrenamiento")
+        self.ax_mode.set_ylabel("Moda de la acción (entre entornos)")
+        self.line_mode, = self.ax_mode.plot([], [], lw=1, marker='o', ms=3, label="Moda(acciones)")
+        self.ax_mode.legend()
+        self.fig_mode.show()
+
+        # Buffers para moda por paso
+        self.step_idx = 0
+        self.moda_por_paso = []    # guarda la moda (int) en cada step
+
     
     def _on_training_start(self) -> None:
         # Detectar n_actions si el env es discreto
@@ -83,11 +78,6 @@ class LivePlotCallback(BaseCallback):
             except Exception:
                 self.n_envs = 1
 
-        # Inicializar buffers por entorno
-        self.actions_ep = [[] for _ in range(self.n_envs)]
-
-        print(f"[LivePlotCallback] Inicializado con {self.n_envs} entornos paralelos")
-
     def _ensure_init(self):
         # Detecta n_envs en el primer paso si no fue provisto
         if self.n_envs is None:
@@ -106,76 +96,63 @@ class LivePlotCallback(BaseCallback):
     def _on_step(self) -> bool:
         self._ensure_init()
 
-        actions = self.locals.get("actions", None)  # (n_envs,) o (n_envs,1)
-        infos   = self.locals.get("infos", [])
-
-        # ===== Guardar acciones (discretas) por env =====
+        # ===== Moda entre entornos en este paso =====
+        actions = self.locals.get("actions", None)
         if actions is not None:
-            vec = np.asarray(actions).ravel()
-            # Si vienen como float, casteamos a int
-            vec = vec.astype(int)
+            a = np.asarray(actions)
 
-            n_envs_step = int(vec.shape[0])
-            if self.actions_ep is None or len(self.actions_ep) != n_envs_step:
-                self.actions_ep = [[] for _ in range(n_envs_step)]
+            # Normalizar shape → vector (n_envs,)
+            if a.ndim == 2 and a.shape[1] >= 1:
+                a = a[:, 0]
+            else:
+                a = np.ravel(a)
 
-            for i in range(n_envs_step):
-                self.actions_ep[i].append(int(vec[i]))
+            # Asegurar enteros (algunos policies devuelven float para Discrete)
+            a = a.astype(int, copy=False)
 
-            episodios_cerrados = 0
-            for i, info in enumerate(infos):
-                if isinstance(info, dict) and ("episode" in info):
-                    # --- Moda del episodio del env i ---
-                    last_ep_actions = self.actions_ep[i] if i < len(self.actions_ep) else []
-                    if last_ep_actions:
-                        ep_mode = Counter(last_ep_actions).most_common(1)[0][0]
-                    else:
-                        ep_mode = np.nan
-                    self.episode_modes.append(ep_mode)
+            # Moda con bincount
+            if self.n_actions is not None:
+                counts = np.bincount(a, minlength=self.n_actions)
+            else:
+                counts = np.bincount(a)
+            moda_accion = int(np.argmax(counts))
 
-                    # limpiar buffer del env que cerró
-                    if i < len(self.actions_ep):
-                        self.actions_ep[i] = []
+            # ===== Guardar serie temporal de la moda =====
+            self.moda_por_paso.append(moda_accion)
+            self.step_idx += 1
 
-                    # métrica de recompensa y contador
-                    self.episode_rewards.append(float(info["episode"]["r"]))
-                    episodios_cerrados += 1
+            # ===== Graficar en vivo (decimado por refresh_every) =====
+            if (self.step_idx % self.refresh_every) == 0:
+                xs = np.arange(1, len(self.moda_por_paso) + 1)
+                self.line_mode.set_data(xs, self.moda_por_paso)
+                self.ax_mode.set_xlim(1, max(50, len(self.moda_por_paso)))
+                self.fig_mode.canvas.draw()
+                self.fig_mode.canvas.flush_events()
+
+        infos   = self.locals.get("infos", [])
+        episodios_cerrados = 0
+        for i, info in enumerate(infos):
+            if isinstance(info, dict) and ("episode" in info):
+
+                # limpiar buffer del env que cerró
+                if i < len(self.actions_ep):
+                    self.actions_ep[i] = []
+
+                # métrica de recompensa y contador
+                self.episode_rewards.append(float(info["episode"]["r"]))
+                episodios_cerrados += 1
 
             self.episode_count += episodios_cerrados
 
-            # === actualizar gráfico de recompensas si cerraron episodios ===
-            if episodios_cerrados > 0:
-                avg = np.mean(self.episode_rewards[-100:])
-                self.moving_avg_rewards.extend([avg] * episodios_cerrados)
-                x = list(range(1, len(self.episode_rewards) + 1))
-                self.line.set_data(x, self.episode_rewards)
-                self.line_avg.set_data(x, self.moving_avg_rewards)
-                self.ax.relim(); self.ax.autoscale_view()
-                self.fig.canvas.draw(); self.fig.canvas.flush_events()
-
-        # === Moda por bloques de 12 episodios (robusto a n_envs > 1) ===
-        bloques_hechos = len(self.block_x)
-        bloques_disponibles = len(self.episode_modes) // 12
-
-        while bloques_hechos < bloques_disponibles:
-            end = (bloques_hechos + 1) * 12
-            bloque = self.episode_modes[end-12:end]
-            bloque_valid = [int(a) for a in bloque if not (isinstance(a, float) and np.isnan(a))]
-            block_mode = Counter(bloque_valid).most_common(1)[0][0] if bloque_valid else np.nan
-
-            self.block_x.append(end)     
-            self.block_y.append(block_mode)
-
-            self.line_mode.set_data(self.block_x, self.block_y)
-
-            if getattr(self, "n_actions", None):
-                self.ax_mode.set_yticks(range(self.n_actions))
-                self.ax_mode.set_ylim(-0.5, self.n_actions - 0.5)
-
-            self.ax_mode.relim(); self.ax_mode.autoscale_view(scaley=False)
-            self.fig_mode.canvas.draw(); self.fig_mode.canvas.flush_events()
-
-            bloques_hechos += 1
+        # === actualizar gráfico de recompensas si cerraron episodios ===
+        if episodios_cerrados > 0:
+            avg = np.mean(self.episode_rewards[-100:])
+            self.moving_avg_rewards.extend([avg] * episodios_cerrados)
+            x = list(range(1, len(self.episode_rewards) + 1))
+            self.line.set_data(x, self.episode_rewards)
+            self.line_avg.set_data(x, self.moving_avg_rewards)
+            self.ax.relim(); self.ax.autoscale_view()
+            self.fig.canvas.draw(); self.fig.canvas.flush_events()
 
         plt.pause(0.001)
         return True
