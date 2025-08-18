@@ -13,6 +13,7 @@ from gymnasium.wrappers import TimeLimit
 from scipy.stats import mode
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib.colors import ListedColormap, BoundaryNorm
 matplotlib.use("TkAgg")
 
 # Activa modo interactivo
@@ -47,19 +48,36 @@ class LivePlotCallback(BaseCallback):
         self.ax.legend()
         self.fig.show()      
 
-        # ======= Figura 2: Moda de acciones entre entornos (por paso) =======
-        self.fig_mode, self.ax_mode = plt.subplots()
-        self.ax_mode.set_xlabel("Paso de entrenamiento")
-        self.ax_mode.set_ylabel("Moda de la acción (entre entornos)")
-        self.line_mode, = self.ax_mode.plot([], [], lw=1, marker='o', ms=3, label="Moda(acciones)")
-        self.ax_mode.legend()
-        self.fig_mode.show()
+        self.block_size = 12                 # 12 semanas por bloque
+        self.max_blocks_visible = 1200       # cuántos bloques mostrar
+
+        self.step_modes = []                 # moda entre entornos por paso
+        self.block_modes = []                # moda de 12 pasos
+
+        # === Figura 2: Heatmap de acciones por bloque (12 semanas) ===
+
+        cmap = ListedColormap(["#0d47a1", "#1976d2", "#43a047", "#fbc02d", "#e53935"])
+        # bordes entre clases enteras: -0.5, 0.5, 1.5, ..., 4.5
+        self.norm = BoundaryNorm(np.arange(-0.5, 5.5, 1.0), cmap.N)
+
+        self.fig2, self.ax_heat = plt.subplots(figsize=(10, 2))
+        self.img = self.ax_heat.imshow(
+            np.empty((1, 0), dtype=int),
+            aspect="auto", interpolation="nearest",
+            cmap=cmap, norm=self.norm
+        )
+        self.ax_heat.set_yticks([])  # una sola fila
+        self.ax_heat.set_xlabel("Bloques de 12 semanas")
+        cbar = self.fig2.colorbar(self.img, ax=self.ax_heat, orientation="horizontal", pad=0.25)
+        cbar.set_ticks([0,1,2,3,4])
+        cbar.set_label("Acción (0–4)")
+        self.fig2.tight_layout()
+        self.fig2.show()
 
         # Buffers para moda por paso
         self.step_idx = 0
         self.moda_por_paso = []    # guarda la moda (int) en cada step
-
-    
+  
     def _on_training_start(self) -> None:
         # Detectar n_actions si el env es discreto
         try:
@@ -67,16 +85,18 @@ class LivePlotCallback(BaseCallback):
         except Exception:
             self.n_actions = None
 
-        if self.n_actions:
-            self.ax_mode.set_yticks(range(self.n_actions))
-            self.ax_mode.set_ylim(-0.5, self.n_actions - 0.5)
-
         # Detectar n_envs si no lo pasaste explícitamente
         if self.n_envs is None:
             try:
                 self.n_envs = self.training_env.num_envs
             except Exception:
                 self.n_envs = 1
+
+    # ---- helper opcional dentro de la clase ----
+    def _mode_int(self, arr, n_actions):
+        # arr de ints (p.ej. [0,1,1,4,...]); devuelve la moda (rompe empates por argmax)
+        counts = np.bincount(np.asarray(arr, dtype=int), minlength=n_actions)
+        return int(np.argmax(counts))
 
     def _ensure_init(self):
         # Detecta n_envs en el primer paso si no fue provisto
@@ -96,38 +116,46 @@ class LivePlotCallback(BaseCallback):
     def _on_step(self) -> bool:
         self._ensure_init()
 
-        # ===== Moda entre entornos en este paso =====
-        actions = self.locals.get("actions", None)
-        if actions is not None:
-            a = np.asarray(actions)
+        # Leer acciones del paso actual
+        acts = self.locals.get("actions", None)
+        if acts is not None:
+            # A2C/PPO pueden traer tensor; normalizamos a vector de ints
+            try:
+                import torch
+                if isinstance(acts, torch.Tensor):
+                    acts = acts.detach().cpu().numpy()
+            except Exception:
+                pass
+            acts = np.asarray(acts).reshape(-1)
 
-            # Normalizar shape → vector (n_envs,)
-            if a.ndim == 2 and a.shape[1] >= 1:
-                a = a[:, 0]
+            if self.n_actions and np.issubdtype(acts.dtype, np.floating):
+                acts = np.clip(np.rint(acts * (self.n_actions - 1)), 0, self.n_actions - 1).astype(int)
             else:
-                a = np.ravel(a)
+                acts = acts.astype(int)
 
-            # Asegurar enteros (algunos policies devuelven float para Discrete)
-            a = a.astype(int, copy=False)
+            # Moda entre entornos en este paso
+            step_mode = self._mode_int(acts, self.n_actions or 5)
+            self.step_modes.append(step_mode)
 
-            # Moda con bincount
-            if self.n_actions is not None:
-                counts = np.bincount(a, minlength=self.n_actions)
-            else:
-                counts = np.bincount(a)
-            moda_accion = int(np.argmax(counts))
+            # Cada 12 pasos: moda temporal del bloque y refresco del heatmap
+            if len(self.step_modes) % self.block_size == 0:
+                last_block = self.step_modes[-self.block_size:]
+                block_mode = self._mode_int(last_block, self.n_actions or 5)
+                self.block_modes.append(block_mode)
 
-            # ===== Guardar serie temporal de la moda =====
-            self.moda_por_paso.append(moda_accion)
-            self.step_idx += 1
+                data = np.asarray(self.block_modes, dtype=int)[None, :]   # shape (1, L)
+                self.img.set_data(data)
 
-            # ===== Graficar en vivo (decimado por refresh_every) =====
-            if (self.step_idx % self.refresh_every) == 0:
-                xs = np.arange(1, len(self.moda_por_paso) + 1)
-                self.line_mode.set_data(xs, self.moda_por_paso)
-                self.ax_mode.set_xlim(1, max(50, len(self.moda_por_paso)))
-                self.fig_mode.canvas.draw()
-                self.fig_mode.canvas.flush_events()
+                # Mostrar solo ventana deslizante para que se lea
+                L = data.shape[1]
+                left = max(0, L - self.max_blocks_visible)
+                self.ax_heat.set_xlim(left, L)   # recorta a la derecha (tiempo)
+                # Ajusta la "extent" para que los ticks vayan de 0 a L en X
+                self.img.set_extent([0, L, -0.5, 0.5])
+
+                self.fig2.canvas.draw()
+                self.fig2.canvas.flush_events()
+
 
         infos   = self.locals.get("infos", [])
         episodios_cerrados = 0
