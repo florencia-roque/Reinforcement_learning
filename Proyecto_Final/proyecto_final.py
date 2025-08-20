@@ -204,7 +204,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo] * 1.3
+            return energias_demandas.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -393,7 +393,7 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=104, learning_rate=3e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 3000
+    total_episodes = 5000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
