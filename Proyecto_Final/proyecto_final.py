@@ -3,7 +3,7 @@
 # from stable_baselines3.common.policies import MlpLstmPolicy
 from sb3_contrib import RecurrentPPO
 from sb3_contrib.ppo_recurrent.policies import MlpLstmPolicy
-from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
 from stable_baselines3.common.callbacks import BaseCallback
 
 import os
@@ -93,7 +93,7 @@ class HydroThermalEnv(gym.Env):
     T0 = 0
     T_MAX = 103
     N_HIDRO = 5
-    N_ACCIONES = 11  # Nuevo: 0%, 10%, 20%, ..., 100%
+    N_ACCIONES = 21  # 0%, 5%, 10%, ..., 100% para más granularidad
 
     P_CLAIRE_MAX = 1541 # MW
     P_SOLAR_MAX = 254 # MW
@@ -114,10 +114,12 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 0 # USD/MWh 
-    COSTO_TERMICO_BAJO = 100 # USD/MWh 
-    COSTO_TERMICO_ALTO = 300 # USD/MWh
-    COSTO_VERTIMIENTO = 1000 # USD/hm3
+    VALOR_EXPORTACION = 0.0 # USD/MWh 
+    COSTO_TERMICO_BAJO = 100.0 # USD/MWh 
+    COSTO_TERMICO_ALTO = 600.0 # USD/MWh
+    COSTO_VERTIMIENTO = 1000.0 # USD/hm3
+    # Costo de oportunidad del agua (en USD por MWh del agua)
+    COSTO_OPORT_AGUA_USD_MWh = 30.0
 
     def __init__(self):
         # Espacio de observación
@@ -331,7 +333,12 @@ class HydroThermalEnv(gym.Env):
             "ingreso_exportacion": ingreso_exportacion,
             "demanda": self._demanda(),
             "demanda_residual": self._demanda() - self._gen_renovable(),
-            "fraccion_turbinado": frac
+            "fraccion_turbinado": frac,
+
+            # --- métricas de diagnóstico ---
+            "qt_max_fisico": qt_max_fisico,
+            "energia_hidro_max_frac": energia_hidro_max_frac,
+            "energia_hidro_obj": energia_hidro_obj,
         }
         
         # Actualizar variables internas
@@ -354,14 +361,24 @@ class HydroThermalEnv(gym.Env):
         # Costo por vertimiento
         costo_vertimiento = self.vertimiento * self.COSTO_VERTIMIENTO # USD
 
-        # recompensa: ingreso_exportacion − costo_termico − penalizacion_vol_bajo − costo_vertimiento
-        reward_usd = - costo_termico - penalizacion_vol_bajo - costo_vertimiento# USD
+        # Costo de oportunidad del agua por semana (suave)
+        costo_oportunidad_agua = 0.0
+        if self.COSTO_OPORT_AGUA_USD_MWh > 0.0:
+            # Peso estacional (ej: semanas secas ~ 45-70)
+            s = 1.5 if 45 <= (self.tiempo % 52) <= 70 else 1.0
+            # Peso por estado hidrológico (más seco => mayor valor del agua)
+            w = {0: 2.0, 1: 1.5, 2: 1.0, 3: 0.7, 4: 0.5}[int(self.hidrologia)]
+            valor_hm3 = self.K_CLAIRE * self.COSTO_OPORT_AGUA_USD_MWh * s * w  # USD/hm3
+            costo_oportunidad_agua = valor_hm3 * qt
+
+        # Recompensa
+        reward_usd = - costo_termico - penalizacion_vol_bajo - costo_vertimiento - costo_oportunidad_agua  # USD
 
         done = (self.tiempo >= self.T_MAX)
         if done:
-            valor_agua_usd_por_hm3 = self.K_CLAIRE * self.COSTO_TERMICO_BAJO  # ~USD/hm3
-            deficit = max(self.V0 - self.volumen, 0.0)
-            reward_usd -= valor_agua_usd_por_hm3 * deficit
+            V_TARGET_END = 0.50 * self.V_CLAIRE_MAX   # meta de fin de horizonte
+            deficit_end = max(V_TARGET_END - self.volumen, 0.0)
+            reward_usd -= self.K_CLAIRE * self.COSTO_TERMICO_ALTO * deficit_end  # valor del agua a costo alto
 
         reward = reward_usd / 1e6  # escalar a MUSD
 
@@ -439,9 +456,10 @@ def entrenar():
     print("Comienzo de entrenamiento...")
     t0 = time.perf_counter()
     # vectorizado de entrenamiento (usar DummyVecEnv en Windows para evitar sobrecarga de procesos)
-    n_envs = 1
+    n_envs = 8
     vec_env = DummyVecEnv([make_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
+    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)  # <<< normaliza
 
     # Definir una arquitectura de red más grande
     policy_kwargs = dict(
@@ -450,27 +468,33 @@ def entrenar():
         net_arch=dict(pi=[128], vf=[128]),
     )
 
+    # Schedule lineal de LR: empieza en 3e-4 y va a 0
+    def lr_schedule(progress_remaining: float) -> float:
+        return 3e-4 * progress_remaining
+
     model = RecurrentPPO(
         MlpLstmPolicy,
         vec_env,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        n_steps=104,         # ventana mas larga
-        batch_size=256,      # mini-batch moderado
-        n_epochs=4,          # menos épocas por actualización
+        n_steps=104,         # 1 episodio por actualización
+        batch_size=416,      # n_envs * n_steps = 4*104
+        n_epochs=8,          # más pasadas para aprovechar el batch
         gamma=0.999,         # mira mas lejos
-        ent_coef=0.05,       # evita colapso temprano a extremos
-        learning_rate=3e-4,
-        device="auto"        # usa GPU si hay
+        ent_coef=0.005,      # evita colapso temprano a extremos
+        learning_rate=lr_schedule,
+        device="auto",       # usa GPU si hay
+        seed=0,
     )
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 3_000
+    total_episodes = 10_000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     callback = LivePlotCallback(plot_every=1)
     model.learn(total_timesteps=total_timesteps, callback=callback)
     model.save("RecurrentPPO_hydro_thermal_claire_discrete")
+    vec_env.save("vecnorm.pkl")  # <<< guarda stats
 
     dt = time.perf_counter() - t0
     dt /= 60  # convertir a minutos
@@ -500,10 +524,12 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
     recompensa_total = []
 
     print(f"Evaluando durante {n_eval_episodes} episodios...")
+    n_envs = getattr(eval_env, "num_envs", 1)
+
     for i in range(n_eval_episodes):
-        obs, info = eval_env.reset()
+        obs = eval_env.reset()
         recompensa_episodio = 0
-        state, episode_start = None, True
+        state, episode_start = None, np.ones((n_envs,), dtype=bool)
         
         for _ in range(num_pasos + 1):
             action, state = model.predict(
@@ -512,16 +538,21 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
                 episode_start=episode_start, 
                 deterministic=True
             )
-            obs, reward, done, _, info = eval_env.step(action)
+            obs, rewards, dones, infos = eval_env.step(action)
+
+            # Extrae el primer env (usas n_envs=1)
+            a = int(action[0]) if np.ndim(action) > 0 else int(action)
+            r = float(rewards[0]) if np.ndim(rewards) > 0 else float(rewards)
+            info = infos[0] if isinstance(infos, (list, tuple)) else infos
             
             resultado_paso = info.copy()
-            resultado_paso["action"] = int(action)
-            resultado_paso["reward"] = reward
+            resultado_paso["action"] = a
+            resultado_paso["reward"] = r
             resultados_todos_episodios.append(resultado_paso)
-            recompensa_episodio += reward
+            recompensa_episodio += r
 
-            episode_start = done
-            if done:
+            episode_start = dones
+            if np.any(dones):
                 break
         
         recompensa_total.append(recompensa_episodio)
@@ -535,7 +566,7 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
     df_all = pd.DataFrame(resultados_todos_episodios)
 
     # Calcular el promedio por paso de tiempo
-    df_avg = df_all.groupby("tiempo").mean().reset_index()
+    df_avg = df_all.groupby("tiempo").mean(numeric_only=True).reset_index()
             
     return df_avg
 
@@ -543,18 +574,51 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    df_trayectorias_copy = df_trayectorias.copy()
-    tiempos = df_trayectorias_copy.pop("tiempo")
+    # Función auxiliar para “aplanar” valores a escalares cuando sea posible
+    def to_scalar(v):
+        if isinstance(v, (np.generic,)):  # np.float64, np.int64, etc.
+            return v.item()
+        if isinstance(v, np.ndarray):
+            if v.ndim == 0:
+                return v.item()
+            if v.size == 1:
+                return v.reshape(()).item()
+            return np.nan  # secuencia no-escalar -> no ploteable
+        if isinstance(v, (list, tuple)):
+            return v[0] if len(v) == 1 else np.nan
+        return v
 
-    for col in df_trayectorias_copy.columns:
-        fig, ax = plt.subplots()
-        ax.plot(tiempos, df_trayectorias_copy[col], marker='o')
-        ax.set_ylabel(col)
-        ax.set_xlabel("Semanas")
-        ax.grid(True)
-        nombre_figura = f"{col}.png"
-        fig.savefig(os.path.join(output_dir, nombre_figura))
-        plt.close(fig)
+    # Coaccionar celdas potencialmente problemáticas y quedarnos con numéricas
+    df_clean = df_trayectorias.copy()
+    for col in df_clean.columns:
+        df_clean[col] = df_clean[col].map(to_scalar)
+
+    # Solo columnas numéricas
+    df_num = df_clean.select_dtypes(include=[np.number]).copy()
+
+    if "tiempo" not in df_num.columns:
+        print("Columna 'tiempo' no está disponible como numérica; no se pueden graficar trayectorias.")
+        return
+
+    tiempos = df_num.pop("tiempo")
+
+    # Graficar solo columnas numéricas (omitimos las que queden vacías o NaN)
+    for col in df_num.columns:
+        serie = pd.to_numeric(df_num[col], errors="coerce")
+        if serie.isna().all():
+            print(f"Saltando columna no numérica o inválida: {col}")
+            continue
+        try:
+            fig, ax = plt.subplots()
+            ax.plot(tiempos, serie, marker='o')
+            ax.set_ylabel(col)
+            ax.set_xlabel("Semanas")
+            ax.grid(True)
+            nombre_figura = f"{col}.png"
+            fig.savefig(os.path.join(output_dir, nombre_figura))
+            plt.close(fig)
+        except Exception as e:
+            print(f"No se pudo graficar columna {col}: {e}")
 
 def graficar_resumen_evaluacion(df_eval):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -590,8 +654,16 @@ if __name__ == "__main__":
 
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
-    eval_env = make_env()
-    eval_env.reset(seed=123)
+    eval_env = DummyVecEnv([make_env])
+    try:
+        eval_env = VecNormalize.load("vecnorm.pkl", eval_env)
+        eval_env.training = False
+        eval_env.norm_reward = False
+        print("VecNormalize cargado para evaluación.")
+    except Exception as e:
+        print(f"No se pudo cargar VecNormalize: {e}")
+
+    eval_env.reset()
     df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
