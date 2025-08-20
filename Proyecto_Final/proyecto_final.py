@@ -1,6 +1,4 @@
 # type: ignore
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecMonitor
-from stable_baselines3.common.callbacks import BaseCallback
 
 import os
 import time
@@ -15,179 +13,45 @@ import matplotlib
 from matplotlib.colors import ListedColormap, BoundaryNorm
 matplotlib.use("TkAgg")
 
-# Activa modo interactivo
-plt.ion()
+# --- Plotter simple de recompensas por episodio ---
+class LiveRewardPlotter:
+    def __init__(self, window=100, refresh_every=10, title="Recompensa por episodio"):
+        self.window = window
+        self.refresh_every = refresh_every
+        self.rewards_ep = []
+        self.moving_avg = []
 
-class LivePlotCallback(BaseCallback):
-    def __init__(self, env_action_space=None, verbose=0, refresh_every=1, n_envs=None):
-        super().__init__(verbose)
-
-        self.refresh_every = refresh_every 
-
-        self.agg_x, self.agg_y = [], []
-
-        self.n_envs = n_envs  # puede ser None si querés que lo detecte al inicio
-
-        # Límites de acción (dinámicos si te pasan el espacio)
-        self.action_low  = float(env_action_space.low[0])  if env_action_space is not None else 0.0
-        self.action_high = float(env_action_space.high[0]) if env_action_space is not None else 1.0
-
-        self.actions_ep = None                      # -> lista de listas (uno por env)
-
-        self.episode_rewards = []                   # recompensa por episodio (global)
-        self.moving_avg_rewards = []
-        self.episode_count = 0                      # episodios cerrados (suma sobre todos los envs)
-
-        # ======= Figura 1: Recompensas =======
+        plt.ion()
         self.fig, self.ax = plt.subplots()
         self.ax.set_xlabel("Episodio")
-        self.ax.set_ylabel("Recompensa por episodio")
-        self.line, = self.ax.plot([], [], lw=1, label="Reward", marker='o')
-        self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)", marker='o')
+        self.ax.set_ylabel("Recompensa")
+        self.ax.set_title(title)
+
+        (self.line,) = self.ax.plot([], [], lw=1, label="Reward")
+        (self.line_avg,) = self.ax.plot([], [], lw=2, label=f"Media móvil ({window})")
         self.ax.legend()
-        self.fig.show()      
+        self.fig.show()
 
-        self.block_size = 12                 # 12 semanas por bloque
-        self.max_blocks_visible = 1200       # cuántos bloques mostrar
+    def update(self, r):
+        self.rewards_ep.append(float(r))
+        # media móvil
+        w = min(self.window, len(self.rewards_ep))
+        self.moving_avg.append(np.mean(self.rewards_ep[-w:]))
 
-        self.step_modes = []                 # moda entre entornos por paso
-        self.block_modes = []                # moda de 12 pasos
+        # refrescar cada N episodios
+        if len(self.rewards_ep) % self.refresh_every == 0:
+            x = np.arange(1, len(self.rewards_ep) + 1)
+            self.line.set_data(x, self.rewards_ep)
+            self.line_avg.set_data(x, self.moving_avg)
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+            plt.pause(0.001)
 
-        # === Figura 2: Heatmap de acciones por bloque (12 semanas) ===
-
-        cmap = ListedColormap(["#0d47a1", "#1976d2", "#43a047", "#fbc02d", "#e53935"])
-        # bordes entre clases enteras: -0.5, 0.5, 1.5, ..., 4.5
-        self.norm = BoundaryNorm(np.arange(-0.5, 5.5, 1.0), cmap.N)
-
-        self.fig2, self.ax_heat = plt.subplots(figsize=(10, 2))
-        self.img = self.ax_heat.imshow(
-            np.empty((1, 0), dtype=int),
-            aspect="auto", interpolation="nearest",
-            cmap=cmap, norm=self.norm
-        )
-        self.ax_heat.set_yticks([])  # una sola fila
-        self.ax_heat.set_xlabel("Bloques de 12 semanas")
-        cbar = self.fig2.colorbar(self.img, ax=self.ax_heat, orientation="horizontal", pad=0.25)
-        cbar.set_ticks([0,1,2,3,4])
-        cbar.set_label("Acción (0–4)")
-        self.fig2.tight_layout()
-        self.fig2.show()
-
-        # Buffers para moda por paso
-        self.step_idx = 0
-        self.moda_por_paso = []    # guarda la moda (int) en cada step
-  
-    def _on_training_start(self) -> None:
-        # Detectar n_actions si el env es discreto
-        try:
-            self.n_actions = int(self.training_env.action_space.n)
-        except Exception:
-            self.n_actions = None
-
-        # Detectar n_envs si no lo pasaste explícitamente
-        if self.n_envs is None:
-            try:
-                self.n_envs = self.training_env.num_envs
-            except Exception:
-                self.n_envs = 1
-
-    # ---- helper opcional dentro de la clase ----
-    def _mode_int(self, arr, n_actions):
-        # arr de ints (p.ej. [0,1,1,4,...]); devuelve la moda (rompe empates por argmax)
-        counts = np.bincount(np.asarray(arr, dtype=int), minlength=n_actions)
-        return int(np.argmax(counts))
-
-    def _ensure_init(self):
-        # Detecta n_envs en el primer paso si no fue provisto
-        if self.n_envs is None:
-            # SB3: self.training_env.num_envs está disponible
-            if hasattr(self, "training_env") and hasattr(self.training_env, "num_envs"):
-                self.n_envs = int(self.training_env.num_envs)
-            else:
-                # Fallback: usar largo de infos
-                infos = self.locals.get("infos", [])
-                self.n_envs = len(infos) if isinstance(infos, (list, tuple)) else 1
-
-        if self.actions_ep is None:
-            self.actions_ep = [[] for _ in range(self.n_envs)]
-        
-
-    def _on_step(self) -> bool:
-        self._ensure_init()
-
-        # Leer acciones del paso actual
-        acts = self.locals.get("actions", None)
-        if acts is not None:
-            # A2C/PPO pueden traer tensor; normalizamos a vector de ints
-            try:
-                import torch
-                if isinstance(acts, torch.Tensor):
-                    acts = acts.detach().cpu().numpy()
-            except Exception:
-                pass
-            acts = np.asarray(acts).reshape(-1)
-
-            if self.n_actions and np.issubdtype(acts.dtype, np.floating):
-                acts = np.clip(np.rint(acts * (self.n_actions - 1)), 0, self.n_actions - 1).astype(int)
-            else:
-                acts = acts.astype(int)
-
-            # Moda entre entornos en este paso
-            step_mode = self._mode_int(acts, self.n_actions or 5)
-            self.step_modes.append(step_mode)
-
-            # Cada 12 pasos: moda temporal del bloque y refresco del heatmap
-            if len(self.step_modes) % self.block_size == 0:
-                last_block = self.step_modes[-self.block_size:]
-                block_mode = self._mode_int(last_block, self.n_actions or 5)
-                self.block_modes.append(block_mode)
-
-                data = np.asarray(self.block_modes, dtype=int)[None, :]   # shape (1, L)
-                self.img.set_data(data)
-
-                # Mostrar solo ventana deslizante para que se lea
-                L = data.shape[1]
-                left = max(0, L - self.max_blocks_visible)
-                self.ax_heat.set_xlim(left, L)   # recorta a la derecha (tiempo)
-                # Ajusta la "extent" para que los ticks vayan de 0 a L en X
-                self.img.set_extent([0, L, -0.5, 0.5])
-
-                self.fig2.canvas.draw()
-                self.fig2.canvas.flush_events()
-
-
-        infos   = self.locals.get("infos", [])
-        episodios_cerrados = 0
-        for i, info in enumerate(infos):
-            if isinstance(info, dict) and ("episode" in info):
-
-                # limpiar buffer del env que cerró
-                if i < len(self.actions_ep):
-                    self.actions_ep[i] = []
-
-                # métrica de recompensa y contador
-                self.episode_rewards.append(float(info["episode"]["r"]))
-                episodios_cerrados += 1
-
-            self.episode_count += episodios_cerrados
-
-        # === actualizar gráfico de recompensas si cerraron episodios ===
-        if episodios_cerrados > 0:
-            avg = np.mean(self.episode_rewards[-100:])
-            self.moving_avg_rewards.extend([avg] * episodios_cerrados)
-            x = list(range(1, len(self.episode_rewards) + 1))
-            self.line.set_data(x, self.episode_rewards)
-            self.line_avg.set_data(x, self.moving_avg_rewards)
-            self.ax.relim(); self.ax.autoscale_view()
-            self.fig.canvas.draw(); self.fig.canvas.flush_events()
-
-        plt.pause(0.001)
-        return True
-
-    def _on_training_end(self) -> None:
-        # Desactiva el modo interactivo y muestra block hasta que se cierre la ventana
+    def close(self):
         plt.ioff()
-        plt.show()
+        plt.show(block=False)
 
 # to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
 
@@ -516,14 +380,22 @@ class HydroThermalEnv(gym.Env):
         t0 = time.perf_counter()
 
         # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-        total_episodes = 10000
+        total_episodes = 100000
+
+        plotter = LiveRewardPlotter(window=100, refresh_every=20, 
+                                title="Q-learning: recompensa por episodio")
 
         for episode in range(total_episodes):
-            print("Episodio: ", episode)
+
+            if episode % 1000 == 0:
+                print("Episodio: ", episode)
+            
             self.reset()
             self.idx = self.codificar_estados()
 
             done = False
+            reward_episodio = 0.0
+
             while not done:
                 # e-greedy
                 if np.random.rand() < self.epsilon:
@@ -539,15 +411,17 @@ class HydroThermalEnv(gym.Env):
 
                 # actualización Q-learning
                 self.Q[self.idx, a] += self.alpha * (reward + self.gamma * np.max(self.Q[next_idx]) - self.Q[self.idx, a])
-
+                reward_episodio += reward
                 self.idx = next_idx
-
+        
+            plotter.update(reward_episodio)
         np.save("Q_table.npy", self.Q)
 
         dt = time.perf_counter() - t0
         dt /= 60  # convertir a minutos
         print(f"Entrenamiento completado en {dt:.2f} minutos")    
 
+        plotter.close()
         return self.Q
 
     # to-do: modificar o borrar 
@@ -696,10 +570,6 @@ if __name__ == "__main__":
     plt.title("Q-table completa (estados x acciones)")
     plt.tight_layout()
     plt.show()
-    
-    # Guardar mapa de calor de la tabla Q
-    os.makedirs("figures", exist_ok=True)
-    plt.savefig("figures/Q_heatmap_global.png", dpi=150)
 
     # Obtener politica optima aplanada
     politica = env.politica_optima() # array de shape (3120,)
