@@ -95,17 +95,17 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500*3 # hm3
-    V0 = V_CLAIRE_MAX / 6 # hm3
+    V_CLAIRE_MAX = 12500 * 3 # hm3
+    V0 = V_CLAIRE_MAX / 3 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 0.0001 # USD/MWh 
+    VALOR_EXPORTACION = 1 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
-    COSTO_TERMICO_ALTO = 30000 # USD/MWh
+    COSTO_TERMICO_ALTO = 300 # USD/MWh
 
     def __init__(self):
         # Espacio de observación
@@ -166,9 +166,6 @@ class HydroThermalEnv(gym.Env):
             "tiempo_inicial": self.tiempo
         }
         return self._get_obs(), info
-
-    # def _sortear_cronica_inicial(self):
-        # return np.random.randint(self.data_matriz_aportes_discreta.shape[1])
     
     def _inicial_hidrologia(self):
         # retorna el estado inicial del estado hidrológico 0,1,2,3,4
@@ -184,25 +181,12 @@ class HydroThermalEnv(gym.Env):
         hidrologia_siguiente = np.random.choice(self.clases_hidrologia, p=self.matrices_hidrologicas[self.tiempo % 52][self.hidrologia,:])
         return hidrologia_siguiente
 
-    def _rotar_fila(self, fila: pd.Series):
-        # rota a la izquierda: s = [x0, x1, x2, ...] -> [x1, x2, ..., x0]
-        valores = fila.tolist()
-        if len(valores) == 0:
-            return fila.copy()
-        rotada = valores[1:] + [valores[0]]
-        return pd.Series(rotada, index=fila.index)
-
     def _aporte(self):
         # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, 
         # sorteo una ocurrencia de aportes para el lago claire
-        estados_ini = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
+        estados = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
-        if self.tiempo == 51 or self.tiempo == 103:
-            estados_fin = self._rotar_fila(self.data_matriz_aportes_discreta.loc[0])  
-        else:
-            estados_fin = self.data_matriz_aportes_discreta.loc[(self.tiempo + 1) % 52] 
-
-        coincidencias = (estados_ini == self.hidrologia_anterior) & (estados_fin == self.hidrologia)
+        coincidencias = (estados == self.hidrologia)
         columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] 
 
         if len(columnas_validas) == 0:
@@ -218,7 +202,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]*1.3
+            return energias_demandas.iloc[self.tiempo] * 1.3
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -254,7 +238,7 @@ class HydroThermalEnv(gym.Env):
         if demanda_residual <= self.P_TERMICO_BAJO_MAX * 168:
             return demanda_residual
         else:
-            return self.P_TERMICO_BAJO_MAX*168
+            return self.P_TERMICO_BAJO_MAX * 168
 
     def _gen_termico_alto(self, demanda_residual):
         if demanda_residual <= self.P_TERMICO_ALTO_MAX * 168:
@@ -378,11 +362,12 @@ class OneHotFlattenObs(gym.ObservationWrapper):
         )
 
     def observation(self, obs):
-        v_norm = obs["volumen"] / HydroThermalEnv.V_CLAIRE_MAX 
+        v_norm = obs["volumen"] / HydroThermalEnv.V_CLAIRE_MAX
+
         h = obs["hidrologia"]
         hidro_oh = np.zeros(HydroThermalEnv.N_HIDRO, dtype=np.float32) 
-
         hidro_oh[h] = 1.0
+
         semana = obs["tiempo"]
         time_oh = np.zeros(HydroThermalEnv.T_MAX + 1, dtype=np.float32)
         time_oh[semana] = 1.0
@@ -404,10 +389,10 @@ def entrenar():
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=32, learning_rate=3e-4)
+    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=104, learning_rate=3e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 500
+    total_episodes = 3000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
@@ -525,7 +510,7 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=1)
+    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
     # Guardar y visualizar los resultados de la evaluación 
