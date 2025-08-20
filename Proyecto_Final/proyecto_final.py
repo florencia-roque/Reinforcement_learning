@@ -10,7 +10,7 @@ from gymnasium.wrappers import TimeLimit
 from scipy.stats import mode
 import matplotlib.pyplot as plt
 import matplotlib
-from matplotlib.colors import ListedColormap, BoundaryNorm
+from datetime import datetime
 matplotlib.use("TkAgg")
 
 # --- Plotter simple de recompensas por episodio ---
@@ -81,9 +81,6 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_MAX = 12500*20 # hm3
     V0 = V_CLAIRE_MAX / 20 # hm3
 
-    N_BINS_VOL = 6
-    VOL_EDGES = np.linspace(V_CLAIRE_MIN, V_CLAIRE_MAX, N_BINS_VOL + 1)
-    
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
@@ -93,16 +90,17 @@ class HydroThermalEnv(gym.Env):
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 3000 # USD/MWh
 
-    N_STATES = N_BINS_VOL*N_HIDRO*(T_MAX+1)
-    N_ACTIONS = 5
-
-    Q = np.zeros((N_STATES, N_ACTIONS))
-
-    alpha = 0.01   # learning rate
-    gamma = 0.995  # discount
-    epsilon = 0.9 # exploración
-
     def __init__(self):
+        self.N_BINS_VOL = 6
+        self.VOL_EDGES = np.linspace(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, self.N_BINS_VOL + 1)
+        self.N_STATES = self.N_BINS_VOL*self.N_HIDRO*(self.T_MAX+1)
+        self.N_ACTIONS = 5
+        self.Q = np.zeros((self.N_STATES, self.N_ACTIONS))
+
+        self.alpha = 0.01   # learning rate
+        self.gamma = 0.995  # discount
+        self.epsilon = 0.7 # exploración
+
         # Espacio de observación
         self.observation_space = spaces.Discrete(self.N_STATES)
         
@@ -199,7 +197,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]*1.5
+            return energias_demandas.iloc[self.tiempo]*1.2
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -350,11 +348,11 @@ class HydroThermalEnv(gym.Env):
         
     def _get_obs(self):
         # Mapeo de variables internas a observación del agente
-        obs = codificar_estados(self.volumen_discreto,self.N_BINS_VOL,self.hidrologia,self.N_HIDRO,self.tiempo)
+        idx = codificar_estados(self.volumen_discreto,self.N_BINS_VOL,self.hidrologia,self.N_HIDRO,self.tiempo)
         
         # Validar contra observation_space
-        assert self.observation_space.contains(obs), f"Observación inválida: {obs}. Debe estar en {self.observation_space}"
-        return obs
+        assert self.observation_space.contains(idx), f"Observación inválida: {idx}. Debe estar en {self.observation_space}"
+        return idx
 
     # to-do: modificar o borrar 
     def cargar_o_entrenar_modelo(model_path):
@@ -474,7 +472,7 @@ def entrenar(env):
             inner_env.idx = next_idx
         
         plotter.update(reward_episodio)
-    np.save("Q_table.npy", inner_env.Q)
+    # np.save("Q_table.npy", inner_env.Q)
 
     dt = time.perf_counter() - t0
     dt /= 60  # convertir a minutos
@@ -522,11 +520,15 @@ def evaluar_modelo(eval_env, Q, num_pasos=103, n_eval_episodes=100):
     # Calcular el promedio por paso de tiempo
     df_avg = df_all.groupby("tiempo").mean().reset_index()
                 
-    return df_avg
+    return df_avg, df_all
 
-def guardar_trayectorias(df_trayectorias, output_dir="figures"):
+def guardar_trayectorias(fecha_hora, df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    fig_fecha_hora = os.path.join(output_dir, f"resultados_{fecha_hora}")
+    if not os.path.exists(fig_fecha_hora):
+        os.makedirs(fig_fecha_hora)
 
     df_trayectorias_copy = df_trayectorias.copy()
     tiempos = df_trayectorias_copy.pop("tiempo")
@@ -538,16 +540,26 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
         ax.set_xlabel("Semanas")
         ax.grid(True)
         nombre_figura = f"{col}.png"
-        fig.savefig(os.path.join(output_dir, nombre_figura))
+        fig.savefig(os.path.join(fig_fecha_hora, nombre_figura))
         plt.close(fig)
 
 if __name__ == "__main__":
     MODEL_PATH = "a2c_hydro_thermal_claire"
-    EVAL_CSV_PATH = "salidas\\trayectorias.csv"
-    EVAL_CSV_ENERGIAS_PATH = "salidas\\energias.csv"
-    EVAL_CSV_ESTADOS_PATH = "salidas\\estados.csv"
-    EVAL_CSV_RESULTADOS_AGENTE_PATH = "salidas\\resultados_agente.csv"
-    EVAL_CSV_COSTOS_PATH = "salidas\\costos.csv"
+
+    fecha_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    carpeta = os.path.join("salidas", f"resultados_{fecha_hora}")
+    # Crear la carpeta (si no existe)
+    os.makedirs(carpeta, exist_ok=True)
+
+    resultados_promedio = os.path.join(carpeta,"promedios")
+    os.makedirs(resultados_promedio, exist_ok=True)
+
+    EVAL_CSV_PATH = os.path.join(resultados_promedio,"trayectorias.csv")
+    EVAL_CSV_ENERGIAS_PATH = os.path.join(resultados_promedio,"energias.csv")
+    EVAL_CSV_ESTADOS_PATH = os.path.join(resultados_promedio,"estados.csv")
+    EVAL_CSV_RESULTADOS_AGENTE_PATH = os.path.join(resultados_promedio,"resultados_agente.csv")
+    EVAL_CSV_COSTOS_PATH = os.path.join(resultados_promedio,"costos.csv")
+
     start_time = time.time()
 
     eval_env = make_env()
@@ -567,8 +579,12 @@ if __name__ == "__main__":
         print("Archivo de tabla Q no encontrado, entrenando uno nuevo...")        
         Q = entrenar(eval_env)
     
-    df_eval = evaluar_modelo(eval_env,Q)
-    guardar_trayectorias(df_eval)
+    # Evaluar el modelo
+    print("Iniciando evaluación del modelo...")
+    eval_env.reset(seed=123)
+    df_eval, df_all = evaluar_modelo(eval_env,Q)
+    df_eval["reward_usd"] = df_eval["reward"] * 1e6
+    guardar_trayectorias(fecha_hora,df_eval)
 
     # Graficar mapa de calor de la tabla Q obtenida después del entrenamiento
     plt.figure(figsize=(8, 10))
@@ -585,6 +601,49 @@ if __name__ == "__main__":
 
     # Obtener politica optima cubo
     politica_cubo = politica_cubo(eval_env,politica) # array de shape (104,5,6)
+
+    pasos_por_ep = 103  
+
+    # Lista para guardar los DataFrames
+    dfs_escenarios = [df_all.iloc[i*pasos_por_ep:(i+1)*pasos_por_ep].reset_index(drop=True) for i in range(100)]
+
+
+    # --- Guardar tabla Q ---
+    ruta_q = os.path.join(carpeta, "Q_table.npy")
+    np.save(ruta_q, Q)
+
+    for i in range(len(dfs_escenarios)):
+        df_escenario = dfs_escenarios[i]
+        # Crear nombre con fecha y hora actual
+        ruta_csv = os.path.join(carpeta, f"escenario_{i}.csv")
+        df_escenario.to_csv(ruta_csv, index=False)
+    
+    # Guardar y visualizar los resultados de la evaluación 
+    df_eval.to_csv(EVAL_CSV_PATH, index=False)
+    print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
+
+    # Guardar energias en un mismo csv
+    df_energias = df_eval.loc[:, ["energia_turbinada", "energia_eolica", "energia_solar", "energia_biomasa", "energia_renovable", "energia_termico_bajo", "energia_termico_alto", "demanda", "demanda_residual"]]
+    df_energias.to_csv(EVAL_CSV_ENERGIAS_PATH, index=False)
+    print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
+
+    # Guardar variables de estado en un mismo csv
+    df_estados = df_eval.loc[:, ["volumen_discreto","volumen", "hidrologia", "tiempo", "aportes", "vertimiento", "turbinado"]]
+    df_estados.to_csv(EVAL_CSV_ESTADOS_PATH, index=False)
+    print(f"Resultados de variables de estado guardados en {EVAL_CSV_ESTADOS_PATH}")
+
+    # Guardar energias en un mismo csv
+    df_resultados_agente = df_eval.loc[:, ["action", "reward"]]
+    df_resultados_agente.to_csv(EVAL_CSV_RESULTADOS_AGENTE_PATH, index=False)
+    print(f"Resultados del agente guardados en {EVAL_CSV_RESULTADOS_AGENTE_PATH}")
+
+    # Guardar energias en un mismo csv
+    df_costos = df_eval.loc[:, ["costo_termico", "ingreso_exportacion"]]
+    df_costos.to_csv(EVAL_CSV_COSTOS_PATH, index=False)
+    print(f"Resultados de costos guardados en {EVAL_CSV_COSTOS_PATH}")
+
+    total_reward = df_eval["reward"].sum()
+    print(f"Recompensa total en evaluación: {total_reward:.2f}")
 
     end_time = time.time()
     execution_time_seconds = end_time - start_time
