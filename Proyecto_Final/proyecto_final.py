@@ -78,8 +78,8 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500*3 # hm3
-    V0 = V_CLAIRE_MAX / 3 # hm3
+    V_CLAIRE_MAX = 12500*20 # hm3
+    V0 = V_CLAIRE_MAX / 20 # hm3
 
     N_BINS_VOL = 6
     VOL_EDGES = np.linspace(V_CLAIRE_MIN, V_CLAIRE_MAX, N_BINS_VOL + 1)
@@ -98,9 +98,9 @@ class HydroThermalEnv(gym.Env):
 
     Q = np.zeros((N_STATES, N_ACTIONS))
 
-    alpha = 0.1   # learning rate
-    gamma = 0.95  # discount
-    epsilon = 0.6 # exploración
+    alpha = 0.01   # learning rate
+    gamma = 0.995  # discount
+    epsilon = 0.9 # exploración
 
     def __init__(self):
         # Espacio de observación
@@ -150,7 +150,7 @@ class HydroThermalEnv(gym.Env):
         super().reset(seed=seed)
 
         self.volumen = self.V0
-        self.volumen_discreto = self.discretizar_volumen(self.V0)
+        self.volumen_discreto = discretizar_volumen(self,self.V0)
         self.tiempo = 0
         self.hidrologia = self._inicial_hidrologia()
 
@@ -199,7 +199,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]*1.3
+            return energias_demandas.iloc[self.tiempo]*1.5
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -324,7 +324,7 @@ class HydroThermalEnv(gym.Env):
         # Actualizar estado hidrologia
         self.hidrologia = self._siguiente_hidrologia()
         # Actualizar estado volumen discreto
-        self.volumen_discreto = self.discretizar_volumen(self.volumen)
+        self.volumen_discreto = discretizar_volumen(self,self.volumen)
         # Actualizar estado tiempo
         self.tiempo += 1
         
@@ -350,79 +350,11 @@ class HydroThermalEnv(gym.Env):
         
     def _get_obs(self):
         # Mapeo de variables internas a observación del agente
-        obs = self.codificar_estados()
+        obs = codificar_estados(self.volumen_discreto,self.N_BINS_VOL,self.hidrologia,self.N_HIDRO,self.tiempo)
         
         # Validar contra observation_space
         assert self.observation_space.contains(obs), f"Observación inválida: {obs}. Debe estar en {self.observation_space}"
         return obs
-
-    def discretizar_volumen(self, v: float) -> int:
-        """
-        Asigna v a un bin en [0..5] usando bordes reales VOL_EDGES.
-        """
-        b = np.digitize([v], self.VOL_EDGES, right=False)[0] - 1
-        return int(np.clip(b, 0, self.N_BINS_VOL - 1))
-    
-    def codificar_estados(self):
-        # representar con un numero entre 0 y idx la tupla (v, h, t)
-        self.idx = self.volumen_discreto + self.N_BINS_VOL * (self.hidrologia + self.N_HIDRO * self.tiempo)
-        return self.idx
-    
-    def decodificar_estados(self):
-        # es la inversa de codificar_estados_aplanando, devuelve (v, h, t) a partir de idx
-        volumen = self.idx % self.N_BINS_VOL
-        hidrologia = (self.idx // self.N_BINS_VOL) % self.N_HIDRO
-        tiempo    = self.idx // (self.N_BINS_VOL * self.N_HIDRO)
-        return (int(volumen), int(hidrologia), int(tiempo))
-    
-    def entrenar(self):
-        print("Comienzo de entrenamiento...")
-        t0 = time.perf_counter()
-
-        # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-        total_episodes = 100000
-
-        plotter = LiveRewardPlotter(window=100, refresh_every=20, 
-                                title="Q-learning: recompensa por episodio")
-
-        for episode in range(total_episodes):
-
-            if episode % 1000 == 0:
-                print("Episodio: ", episode)
-            
-            self.reset()
-            self.idx = self.codificar_estados()
-
-            done = False
-            reward_episodio = 0.0
-
-            while not done:
-                # e-greedy
-                if np.random.rand() < self.epsilon:
-                    a = np.random.randint(self.N_ACTIONS)
-                else:
-                    a = np.argmax(self.Q[self.idx])
-
-                # tomar acción en el ambiente
-                _, reward, terminated, truncated, _ = self.step(a)
-                done = terminated or truncated
-
-                next_idx = self.codificar_estados()
-
-                # actualización Q-learning
-                self.Q[self.idx, a] += self.alpha * (reward + self.gamma * np.max(self.Q[next_idx]) - self.Q[self.idx, a])
-                reward_episodio += reward
-                self.idx = next_idx
-        
-            plotter.update(reward_episodio)
-        np.save("Q_table.npy", self.Q)
-
-        dt = time.perf_counter() - t0
-        dt /= 60  # convertir a minutos
-        print(f"Entrenamiento completado en {dt:.2f} minutos")    
-
-        plotter.close()
-        return self.Q
 
     # to-do: modificar o borrar 
     def cargar_o_entrenar_modelo(model_path):
@@ -444,74 +376,6 @@ class HydroThermalEnv(gym.Env):
 
         return model
     
-    def politica_optima(self):
-        policy = self.Q.argmax(axis=1)
-        return policy
-    
-    def politica_cubo(self,policy):
-        policy_cube = policy.reshape(self.T_MAX+1, self.N_HIDRO, self.N_BINS_VOL)  # [t, h, v]
-        # Ejemplos:
-        # - acción greedy en semana 10, hidro=2, vol-bin=4
-        print(policy_cube[10, 2, 4])
-
-        return policy_cube
-
-    def evaluar_modelo(self, num_pasos=103, n_eval_episodes=1):
-        resultados_todos_episodios = []
-        recompensa_total = []
-
-        politica_optima = self.politica_optima()
-
-        print(f"Evaluando durante {n_eval_episodes} episodios...")
-        for i in range(n_eval_episodes):
-            _, info = self.reset()
-            recompensa_episodio = 0
-            
-            for _ in range(num_pasos + 1):
-
-                action = politica_optima[self.codificar_estados()]
-                _, reward, done, _, info = self.step(action)
-                resultado_paso = info.copy()
-                resultado_paso["action"] = action
-                resultado_paso["reward"] = reward
-                recompensa_episodio += reward
-                resultados_todos_episodios.append(resultado_paso)
-
-                if done:
-                    break
-            
-            recompensa_total.append(recompensa_episodio)
-        
-        # Calcular y mostrar recompensa promedio por episodio
-        recompensa_promedio = np.mean(recompensa_total)
-        recompensa_std = np.std(recompensa_total)
-        print(f"Recompensa promedio por episodio: {recompensa_promedio:.2f} +/- {recompensa_std:.2f}")
-
-        # Convertir todo a un único DataFrame
-        df_all = pd.DataFrame(resultados_todos_episodios)
-
-        # Calcular el promedio por paso de tiempo
-        df_avg = df_all.groupby("tiempo").mean().reset_index()
-                
-        return df_avg
-
-    def guardar_trayectorias(self,df_trayectorias, output_dir="figures"):
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        df_trayectorias_copy = df_trayectorias.copy()
-        tiempos = df_trayectorias_copy.pop("tiempo")
-
-        for col in df_trayectorias_copy.columns:
-            fig, ax = plt.subplots()
-            ax.plot(tiempos, df_trayectorias_copy[col], marker='o')
-            ax.set_ylabel(col)
-            ax.set_xlabel("Semanas")
-            ax.grid(True)
-            nombre_figura = f"{col}.png"
-            fig.savefig(os.path.join(output_dir, nombre_figura))
-            plt.close(fig)
-
     # to-do: modificar o borrar
     def graficar_resumen_evaluacion(df_eval):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -533,6 +397,150 @@ class HydroThermalEnv(gym.Env):
         plt.tight_layout()
         plt.show()
 
+def discretizar_volumen(env, v: float) -> int:
+    """
+    Asigna v a un bin en [0..5] usando bordes reales VOL_EDGES.
+    """
+    b = np.digitize([v], env.VOL_EDGES, right=False)[0] - 1
+    return int(np.clip(b, 0, env.N_BINS_VOL - 1))
+    
+def codificar_estados(volumen_discreto,N_BINS_VOL,hidrologia,N_HIDRO,tiempo):
+    # representar con un numero entre 0 y idx la tupla (v, h, t)
+    idx = volumen_discreto + N_BINS_VOL * (hidrologia + N_HIDRO * tiempo)
+    return idx
+    
+def decodificar_estados(env):
+    # es la inversa de codificar_estados_aplanando, devuelve (v, h, t) a partir de idx
+    volumen = env.idx % env.N_BINS_VOL
+    hidrologia = (env.idx // env.N_BINS_VOL) % env.N_HIDRO
+    tiempo    = env.idx // (env.N_BINS_VOL * env.N_HIDRO)
+    return (int(volumen), int(hidrologia), int(tiempo))
+
+def politica_optima(Q):
+    policy = Q.argmax(axis=1)
+    return policy
+    
+def politica_cubo(env,policy):
+    inner_env = env.unwrapped
+    policy_cube = policy.reshape(inner_env.T_MAX+1, inner_env.N_HIDRO, inner_env.N_BINS_VOL)  # [t, h, v]
+    # Ejemplos:
+    # - acción greedy en semana 10, hidro=2, vol-bin=4
+    print(policy_cube[10, 2, 4])
+
+    return policy_cube
+
+def make_env():
+    env = HydroThermalEnv()
+    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
+    return env
+
+def entrenar(env):
+    print("Comienzo de entrenamiento...")
+    t0 = time.perf_counter()
+
+    # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
+    total_episodes = 10000
+
+    plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
+
+    for episode in range(total_episodes):
+
+        if episode % 1000 == 0:
+            print("Episodio: ", episode)
+            
+        inner_env = env.unwrapped
+        inner_env.reset()
+        inner_env.idx = codificar_estados(inner_env.volumen_discreto,inner_env.N_BINS_VOL,inner_env.hidrologia,inner_env.N_HIDRO,inner_env.tiempo)
+
+        done = False
+        reward_episodio = 0.0
+
+        while not done:
+            # e-greedy
+            if np.random.rand() < inner_env.epsilon:
+                a = np.random.randint(inner_env.N_ACTIONS)
+            else:
+                a = np.argmax(inner_env.Q[inner_env.idx])
+
+            # tomar acción en el ambiente
+            _, reward, terminated, truncated, _ = inner_env.step(a)
+            done = terminated or truncated
+
+            next_idx = codificar_estados(inner_env.volumen_discreto,inner_env.N_BINS_VOL,inner_env.hidrologia,inner_env.N_HIDRO,inner_env.tiempo)
+
+            # actualización Q-learning
+            inner_env.Q[inner_env.idx, a] += inner_env.alpha * (reward + inner_env.gamma * np.max(inner_env.Q[next_idx]) - inner_env.Q[inner_env.idx, a])
+            reward_episodio += reward
+            inner_env.idx = next_idx
+        
+        plotter.update(reward_episodio)
+    np.save("Q_table.npy", inner_env.Q)
+
+    dt = time.perf_counter() - t0
+    dt /= 60  # convertir a minutos
+    print(f"Entrenamiento completado en {dt:.2f} minutos")    
+
+    plotter.close()
+    return inner_env.Q
+
+def evaluar_modelo(eval_env, Q, num_pasos=103, n_eval_episodes=100):
+    resultados_todos_episodios = []
+    recompensa_total = []
+
+    politica = politica_optima(Q)
+
+    inner_env = eval_env.unwrapped
+
+    print(f"Evaluando durante {n_eval_episodes} episodios...")
+    for i in range(n_eval_episodes):
+        _, info = inner_env.reset()
+        recompensa_episodio = 0
+            
+        for _ in range(num_pasos + 1):
+
+            action = politica[codificar_estados(inner_env.volumen_discreto,inner_env.N_BINS_VOL,inner_env.hidrologia,inner_env.N_HIDRO,inner_env.tiempo)]
+            _, reward, done, _, info = inner_env.step(action)
+            resultado_paso = info.copy()
+            resultado_paso["action"] = action
+            resultado_paso["reward"] = reward
+            recompensa_episodio += reward
+            resultados_todos_episodios.append(resultado_paso)
+
+            if done:
+                break
+            
+        recompensa_total.append(recompensa_episodio)
+        
+    # Calcular y mostrar recompensa promedio por episodio
+    recompensa_promedio = np.mean(recompensa_total)
+    recompensa_std = np.std(recompensa_total)
+    print(f"Recompensa promedio por episodio: {recompensa_promedio:.2f} +/- {recompensa_std:.2f}")
+
+    # Convertir todo a un único DataFrame
+    df_all = pd.DataFrame(resultados_todos_episodios)
+
+    # Calcular el promedio por paso de tiempo
+    df_avg = df_all.groupby("tiempo").mean().reset_index()
+                
+    return df_avg
+
+def guardar_trayectorias(df_trayectorias, output_dir="figures"):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    df_trayectorias_copy = df_trayectorias.copy()
+    tiempos = df_trayectorias_copy.pop("tiempo")
+
+    for col in df_trayectorias_copy.columns:
+        fig, ax = plt.subplots()
+        ax.plot(tiempos, df_trayectorias_copy[col], marker='o')
+        ax.set_ylabel(col)
+        ax.set_xlabel("Semanas")
+        ax.grid(True)
+        nombre_figura = f"{col}.png"
+        fig.savefig(os.path.join(output_dir, nombre_figura))
+        plt.close(fig)
+
 if __name__ == "__main__":
     MODEL_PATH = "a2c_hydro_thermal_claire"
     EVAL_CSV_PATH = "salidas\\trayectorias.csv"
@@ -542,28 +550,29 @@ if __name__ == "__main__":
     EVAL_CSV_COSTOS_PATH = "salidas\\costos.csv"
     start_time = time.time()
 
-    env = HydroThermalEnv() 
+    eval_env = make_env()
+    inner_env = eval_env.unwrapped
 
     # Verificar si el archivo del modelo existe
     if os.path.exists("Q_table.npy"):
         try:
             print(f"Cargando tabla Q desde Q_table.npy...")
-            env.Q = np.load("Q_table.npy")
+            Q = np.load("Q_table.npy")
             print("Tabla Q cargada exitosamente.")
         except Exception as e:
             print(f"Error al cargar la tabla Q: {e}")
             print("Entrenando Q-learning de nuevo...")
-            env.Q = env.entrenar()
+            Q = entrenar(eval_env)
     else:
-        print("Archivo de tabla Q no encontrado, entrenando uno nuevo...")
-        env.Q = env.entrenar()
+        print("Archivo de tabla Q no encontrado, entrenando uno nuevo...")        
+        Q = entrenar(eval_env)
     
-    df_eval = env.evaluar_modelo()
-    env.guardar_trayectorias(df_eval)
+    df_eval = evaluar_modelo(eval_env,Q)
+    guardar_trayectorias(df_eval)
 
     # Graficar mapa de calor de la tabla Q obtenida después del entrenamiento
     plt.figure(figsize=(8, 10))
-    plt.imshow(env.Q, aspect='auto')
+    plt.imshow(Q, aspect='auto')
     plt.colorbar(label="Q(s,a)")
     plt.xlabel("Acciones (0..4)")
     plt.ylabel("Estados (idx 0..3119)")
@@ -572,10 +581,10 @@ if __name__ == "__main__":
     plt.show()
 
     # Obtener politica optima aplanada
-    politica = env.politica_optima() # array de shape (3120,)
+    politica = politica_optima(Q) # array de shape (3120,)
 
     # Obtener politica optima cubo
-    politica_cubo = env.politica_cubo(politica) # array de shape (104,5,6)
+    politica_cubo = politica_cubo(eval_env,politica) # array de shape (104,5,6)
 
     end_time = time.time()
     execution_time_seconds = end_time - start_time
