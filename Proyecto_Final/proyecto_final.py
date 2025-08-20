@@ -86,7 +86,7 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 1 # USD/MWh 
+    VALOR_EXPORTACION = -0.1 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 3000 # USD/MWh
 
