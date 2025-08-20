@@ -24,9 +24,11 @@ class LivePlotCallback(BaseCallback):
         self.episode_rewards = []
         self.moving_avg_rewards = []
 
-        self.fig, self.ax = plt.subplots()
+        self.fig, self.ax = plt.subplots(figsize=(10, 8))
         self.ax.set_xlabel("Episodio")
         self.ax.set_ylabel("Recompensa por episodio")
+        self.ax.set_title("Entrenamiento del Agente")
+        self.ax.grid(True)
 
         self.line, = self.ax.plot([], [], lw=1, label="Reward")
         self.line_avg, = self.ax.plot([], [], lw=2, label="Moving Avg (100)")
@@ -278,7 +280,6 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         frac = float(action[0])
-        print(frac)
         qt = min(frac*self.V_CLAIRE_TUR_MAX, self.volumen) # hm3
         #qt_max_sem = min(self.V_CLAIRE_TUR_MAX, self.volumen) # hm3
         #qt = frac * qt_max_sem # hm3
