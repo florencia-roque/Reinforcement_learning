@@ -86,20 +86,20 @@ class HydroThermalEnv(gym.Env):
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
     # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = -0.1 # USD/MWh 
+    VALOR_EXPORTACION = 0 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
-    COSTO_TERMICO_ALTO = 3000 # USD/MWh
+    COSTO_TERMICO_ALTO = 300 # USD/MWh
 
     def __init__(self):
-        self.N_BINS_VOL = 6
+        self.N_BINS_VOL = 20
         self.VOL_EDGES = np.linspace(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, self.N_BINS_VOL + 1)
         self.N_STATES = self.N_BINS_VOL*self.N_HIDRO*(self.T_MAX+1)
-        self.N_ACTIONS = 5
+        self.N_ACTIONS = 40
         self.Q = np.zeros((self.N_STATES, self.N_ACTIONS))
 
-        self.alpha = 0.01   # learning rate
-        self.gamma = 0.995  # discount
-        self.epsilon = 0.7 # exploración
+        self.alpha = 0.001   # learning rate
+        self.gamma = 0.99  # discount
+        self.epsilon = 0.001 # exploración
 
         # Espacio de observación
         self.observation_space = spaces.Discrete(self.N_STATES)
@@ -197,7 +197,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]*1.2
+            return energias_demandas.iloc[self.tiempo]*1.3
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -205,7 +205,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
         energias_eolico = self.data_eolico["PROMEDIO"]
         if self.tiempo < len(energias_eolico):
-            return energias_eolico.iloc[self.tiempo] * 0.75
+            return energias_eolico.iloc[self.tiempo] 
         else:
             raise ValueError("Tiempo fuera de rango para datos eólicos")
 
@@ -281,7 +281,7 @@ class HydroThermalEnv(gym.Env):
 
         # Volumen a turbinar
         # acción recibida como entero 0..4
-        frac = action / 4   # mapea a 0.0, 0.25, 0.5, 0.75, 1.0
+        frac = action /  (self.N_ACTIONS-1)   # mapea a 0.0, 0.25, 0.5, 0.75, 1.0
 
         # ------- PROBAR DE CAMBIAR SI DA MAL ---------------
         v_max = min(self.volumen, self.V_CLAIRE_TUR_MAX) #hm3
@@ -437,7 +437,7 @@ def entrenar(env):
     t0 = time.perf_counter()
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 10000
+    total_episodes = 30000
 
     plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
 
