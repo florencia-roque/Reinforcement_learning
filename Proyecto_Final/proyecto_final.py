@@ -90,6 +90,8 @@ class HydroThermalEnv(gym.Env):
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
+    DETERMINISTICO = 1
+
     def __init__(self):
         self.N_BINS_VOL = 20
         self.VOL_EDGES = np.linspace(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, self.N_BINS_VOL + 1)
@@ -111,6 +113,8 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
         
+        self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
+
         # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
         # convertir a unidad hm3/h
@@ -177,22 +181,48 @@ class HydroThermalEnv(gym.Env):
         return hidrologia_siguiente
 
     def _aporte(self):
-        # sorteo una ocurrencia de aportes para el lago claire dada la hidrologia actual
-        estados = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
-    
-        coincidencias = (estados == self.hidrologia)
-        columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] 
+        # guardo fila de estados para la semana actual
+        estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
-        if len(columnas_validas) == 0:
-            raise ValueError("No hay coincidencias válidas para los estados hidrológicos actuales")
+        # guardo las columnas que tienen el eshy actual
+        coincidencias = (estados_t == self.hidrologia)
+        cronicas_coincidentes = coincidencias[coincidencias].index
+
+        # con las cronicas coincidentes tengo que obtener los aportes para la semana y eshy actual
+        aportes = self.data_matriz_aportes_claire.loc[self.tiempo % 52, cronicas_coincidentes] # hm3/h
+
+        # calculo la media de los aportes para la semana y eshy actual
+        aportes_promedio = np.mean(aportes) # hm3/h
+
+        rango_valido_inf = aportes_promedio-aportes_promedio*0.1
+        rango_valido_sup = aportes_promedio+aportes_promedio*0.1
+
+        # me quedo con los aportes que estén en el promedio +/- 10% 
+        aportes_validos = aportes[(aportes>=rango_valido_inf) & (aportes<=rango_valido_sup)] # hm3/h
+
+        # si aportes_validos es vacio tomo como aporte valido el promedio de aportes
+        if aportes_validos.empty:
+            aporte_final = aportes_promedio
+        else:
+        # sorteo uniformemente uno de los validos
+            aporte_final = self.np_random.choice(aportes_validos)
+
+        # aporte_final = aportes_promedio
         
-        # USAR el RNG del env:
-        año_sorteado = self.np_random.choice(columnas_validas)
+        # return aporte_final*168
 
-        # Obtener valor en claire para fila2 y ese año
-        valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado] # hm3/h
-        return valor_claire * 168
-    
+        valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/h
+       
+        if pd.isna(valor):
+            valor = 0.0
+            print("OJO OJO OJO no encontro valor de aporte determnistico")
+            print("paso: ", self.tiempo)
+ 
+        if(self.DETERMINISTICO == 1):    
+            return valor
+        else:
+            return aporte_final * 168
+
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
@@ -437,7 +467,7 @@ def entrenar(env):
     t0 = time.perf_counter()
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 30000
+    total_episodes = 5000
 
     plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
 
