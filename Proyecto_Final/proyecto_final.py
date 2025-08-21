@@ -82,6 +82,8 @@ def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
         return pd.read_csv(rutaArchivo, sep=sep, header=header, encoding='cp1252')
 
 class HydroThermalEnv(gym.Env):
+
+    DETERMINISTICO = 1
     T0 = 0
     T_MAX = 103
     N_HIDRO = 5
@@ -97,8 +99,8 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500 * 3 # hm3
-    V0 = V_CLAIRE_MAX / 3 # hm3
+    V_CLAIRE_MAX = 12500 * 20 # hm3
+    V0 = V_CLAIRE_MAX / 20 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
@@ -153,6 +155,8 @@ class HydroThermalEnv(gym.Env):
             array_1d = self.data_matrices_hidrologicas.iloc[i, :].values
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
+ 
+        self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
         # Inicializar variables internas
         self.reset()
 
@@ -198,13 +202,31 @@ class HydroThermalEnv(gym.Env):
 
         # Obtener valor en claire para fila2 y ese año
         valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado] # hm3/h
-        return valor_claire * 168
-    
+
+        # print("columnas y head de aportes_deterministicos")
+        # print(self.aportes_deterministicos.head())
+        # print(self.aportes_deterministicos.columns)
+
+        #PRUEBA PARA VER DONDE ESTA EL ERROR, SE DERTERMINIZAN LOS APORTES A VER SI DA ALGO COHERENTE
+        #return valor_claire * 168
+        valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/h
+        
+        if pd.isna(valor):
+            valor = 0.0
+            print("OJO OJO OJO no encontro valor de aporte determnistico")
+            print("paso: ", self.tiempo)
+
+        if(self.DETERMINISTICO == 1):    
+            return valor
+        else: 
+            return valor_claire * 168
+        
+        return valor
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]
+            return energias_demandas.iloc[self.tiempo]*1.
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -390,10 +412,10 @@ def entrenar():
     vec_env = VecMonitor(vec_env)
 
     callback = LivePlotCallback()
-    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=104, learning_rate=3e-4)
+    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=12, learning_rate=5e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 5000
+    total_episodes = 600
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
