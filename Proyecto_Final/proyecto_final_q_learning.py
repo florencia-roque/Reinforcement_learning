@@ -7,7 +7,6 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
-from scipy.stats import mode
 import matplotlib.pyplot as plt
 import matplotlib
 from datetime import datetime
@@ -53,8 +52,6 @@ class LiveRewardPlotter:
         plt.ioff()
         plt.show(block=False)
 
-# to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
-
 # Leer archivo 
 def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
     if rutaArchivo.endswith('.xlsx') or rutaArchivo.endswith('.xls'):
@@ -71,7 +68,7 @@ class HydroThermalEnv(gym.Env):
     P_SOLAR_MAX = 254 # MW
     P_EOLICO_MAX = 1584.7 # MW
     P_BIOMASA_MAX = 487.3 # MW
-    # to-do: revisar si estos valores son correctos
+
     P_TERMICO_BAJO_MAX = 500 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
@@ -85,12 +82,12 @@ class HydroThermalEnv(gym.Env):
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
-    # to-do: revisar si estos valores son correctos
     VALOR_EXPORTACION = 0 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
-    DETERMINISTICO = 1
+    # cambiar a 0 si queremos usar aportes estocásticos
+    DETERMINISTICO = 0
 
     def __init__(self):
         self.N_BINS_VOL = 20
@@ -170,8 +167,6 @@ class HydroThermalEnv(gym.Env):
 
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
-
-        # array con las clases 0,1,2,3,4
         clases = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0])
         # USAR el RNG del env (no el global):
         hidrologia_siguiente = self.np_random.choice(
@@ -209,8 +204,6 @@ class HydroThermalEnv(gym.Env):
 
         # aporte_final = aportes_promedio
         
-        # return aporte_final*168
-
         valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/h
        
         if pd.isna(valor):
@@ -304,16 +297,11 @@ class HydroThermalEnv(gym.Env):
         else:
             action = int(action)
 
-        if hasattr(self.action_space, "n"):
-            action = int(np.clip(action, 0, self.action_space.n - 1))
-
         assert self.action_space.contains(action), f"Acción inválida: {action}"
 
         # Volumen a turbinar
-        # acción recibida como entero 0..4
         frac = action /  (self.N_ACTIONS-1)   # mapea a 0.0, 0.25, 0.5, 0.75, 1.0
 
-        # ------- PROBAR DE CAMBIAR SI DA MAL ---------------
         v_max = min(self.volumen, self.V_CLAIRE_TUR_MAX) #hm3
         v_turb = frac * v_max #hm3
 
@@ -384,51 +372,8 @@ class HydroThermalEnv(gym.Env):
         assert self.observation_space.contains(idx), f"Observación inválida: {idx}. Debe estar en {self.observation_space}"
         return idx
 
-    # to-do: modificar o borrar 
-    def cargar_o_entrenar_modelo(model_path):
-        # Verificar si el archivo del modelo existe
-        if os.path.exists(f"{model_path}.zip"):
-            try:
-                print(f"Cargando modelo desde {model_path}...")
-                model = A2C.load(model_path)
-                print("Modelo cargado exitosamente.")
-            except Exception as e:
-                print(f"Error al cargar el modelo: {e}")
-                print("Entrenando un modelo nuevo...")
-                entrenar()
-                model = A2C.load(model_path)
-        else:
-            print("Archivo del modelo no encontrado, entrenando uno nuevo...")
-            entrenar()
-            model = A2C.load(model_path)
-
-        return model
-    
-    # to-do: modificar o borrar
-    def graficar_resumen_evaluacion(df_eval):
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-        
-        # Acciones
-        ax1.plot(df_eval["tiempo"], df_eval["action"], marker='o', linestyle='-', color='tab:blue')
-        ax1.set_xlabel("Paso (Semana)")
-        ax1.set_ylabel("Acción (Fracción a turbinar)")
-        ax1.set_title("Acciones durante la Evaluación")
-        ax1.grid(True)
-
-        # Recompensas
-        ax2.plot(df_eval["tiempo"], df_eval["reward"], marker='o', linestyle='-', color='tab:green')
-        ax2.set_xlabel("Paso (Semana)")
-        ax2.set_ylabel("Recompensa")
-        ax2.set_title("Recompensas durante la Evaluación")
-        ax2.grid(True)
-
-        plt.tight_layout()
-        plt.show()
-
 def discretizar_volumen(env, v: float) -> int:
-    """
-    Asigna v a un bin en [0..5] usando bordes reales VOL_EDGES.
-    """
+    # Asigna v a un bin en [0..5] usando bordes reales VOL_EDGES
     b = np.digitize([v], env.VOL_EDGES, right=False)[0] - 1
     return int(np.clip(b, 0, env.N_BINS_VOL - 1))
     
@@ -451,10 +396,6 @@ def politica_optima(Q):
 def politica_cubo(env,policy):
     inner_env = env.unwrapped
     policy_cube = policy.reshape(inner_env.T_MAX+1, inner_env.N_HIDRO, inner_env.N_BINS_VOL)  # [t, h, v]
-    # Ejemplos:
-    # - acción greedy en semana 10, hidro=2, vol-bin=4
-    print(policy_cube[10, 2, 4])
-
     return policy_cube
 
 def make_env():
@@ -502,7 +443,6 @@ def entrenar(env):
             inner_env.idx = next_idx
         
         plotter.update(reward_episodio)
-    # np.save("Q_table.npy", inner_env.Q)
 
     dt = time.perf_counter() - t0
     dt /= 60  # convertir a minutos
@@ -574,8 +514,7 @@ def guardar_trayectorias(fecha_hora, df_trayectorias, output_dir="figures"):
         plt.close(fig)
 
 if __name__ == "__main__":
-    MODEL_PATH = "a2c_hydro_thermal_claire"
-
+    start_time = time.time()
     fecha_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     carpeta = os.path.join("salidas", f"resultados_{fecha_hora}")
     # Crear la carpeta (si no existe)
@@ -590,12 +529,10 @@ if __name__ == "__main__":
     EVAL_CSV_RESULTADOS_AGENTE_PATH = os.path.join(resultados_promedio,"resultados_agente.csv")
     EVAL_CSV_COSTOS_PATH = os.path.join(resultados_promedio,"costos.csv")
 
-    start_time = time.time()
-
     eval_env = make_env()
     inner_env = eval_env.unwrapped
 
-    # Verificar si el archivo del modelo existe
+    # Verificar si existe la tabla Q
     if os.path.exists("Q_table.npy"):
         try:
             print(f"Cargando tabla Q desde Q_table.npy...")
@@ -629,14 +566,10 @@ if __name__ == "__main__":
     # Obtener politica optima aplanada
     politica = politica_optima(Q) # array de shape (3120,)
 
-    # Obtener politica optima cubo
-    politica_cubo = politica_cubo(eval_env,politica) # array de shape (104,5,6)
-
-    pasos_por_ep = 103  
+    num_pasos = 103  
 
     # Lista para guardar los DataFrames
-    dfs_escenarios = [df_all.iloc[i*pasos_por_ep:(i+1)*pasos_por_ep].reset_index(drop=True) for i in range(100)]
-
+    dfs_escenarios = [df_all.iloc[i*num_pasos:(i+1)*num_pasos].reset_index(drop=True) for i in range(100)]
 
     # --- Guardar tabla Q ---
     ruta_q = os.path.join(carpeta, "Q_table.npy")
