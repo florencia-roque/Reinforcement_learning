@@ -11,6 +11,7 @@ from gymnasium import spaces
 from gymnasium.wrappers import TimeLimit
 import matplotlib.pyplot as plt
 import matplotlib
+from datetime import datetime
 matplotlib.use("TkAgg")
 
 # Activa modo interactivo
@@ -413,7 +414,7 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=12, learning_rate=5e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 10000
+    total_episodes = 2000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
@@ -477,11 +478,15 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
     # Calcular el promedio por paso de tiempo
     df_avg = df_all.groupby("tiempo").mean().reset_index()
             
-    return df_avg
+    return df_avg, df_all
 
-def guardar_trayectorias(df_trayectorias, output_dir="figures"):
+def guardar_trayectorias(fecha_hora, df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    fig_fecha_hora = os.path.join(output_dir, f"resultados_{fecha_hora}")
+    if not os.path.exists(fig_fecha_hora):
+        os.makedirs(fig_fecha_hora)
 
     df_trayectorias_copy = df_trayectorias.copy()
     tiempos = df_trayectorias_copy.pop("tiempo")
@@ -493,7 +498,7 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
         ax.set_xlabel("Semanas")
         ax.grid(True)
         nombre_figura = f"{col}.png"
-        fig.savefig(os.path.join(output_dir, nombre_figura))
+        fig.savefig(os.path.join(fig_fecha_hora, nombre_figura))
         plt.close(fig)
 
 def graficar_resumen_evaluacion(df_eval):
@@ -517,12 +522,21 @@ def graficar_resumen_evaluacion(df_eval):
     plt.show()
 
 if __name__ == "__main__":
+    fecha_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    carpeta = os.path.join("salidas", f"resultados_{fecha_hora}")
+    # Crear la carpeta (si no existe)
+    os.makedirs(carpeta, exist_ok=True)
+
+    resultados_promedio = os.path.join(carpeta,"promedios")
+    os.makedirs(resultados_promedio, exist_ok=True)
+
     MODEL_PATH = "a2c_hydro_thermal_claire"
-    EVAL_CSV_PATH = "salidas\\trayectorias.csv"
-    EVAL_CSV_ENERGIAS_PATH = "salidas\\energias.csv"
-    EVAL_CSV_ESTADOS_PATH = "salidas\\estados.csv"
-    EVAL_CSV_RESULTADOS_AGENTE_PATH = "salidas\\resultados_agente.csv"
-    EVAL_CSV_COSTOS_PATH = "salidas\\costos.csv"
+    EVAL_CSV_PATH = os.path.join(resultados_promedio,"trayectorias.csv")
+    EVAL_CSV_ENERGIAS_PATH = os.path.join(resultados_promedio,"energias.csv")
+    EVAL_CSV_ESTADOS_PATH = os.path.join(resultados_promedio,"estados.csv")
+    EVAL_CSV_RESULTADOS_AGENTE_PATH = os.path.join(resultados_promedio,"resultados_agente.csv")
+    EVAL_CSV_COSTOS_PATH = os.path.join(resultados_promedio,"costos.csv")
+
     start_time = time.time()
 
     # Cargar o entrenar el modelo
@@ -531,8 +545,19 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_env()
-    df_eval = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
+    df_eval, df_all = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
+
+    num_pasos = 103  
+
+    # Lista para guardar los DataFrames
+    dfs_escenarios = [df_all.iloc[i*num_pasos:(i+1)*num_pasos].reset_index(drop=True) for i in range(100)]
+
+    for i in range(len(dfs_escenarios)):
+        df_escenario = dfs_escenarios[i]
+        # Crear nombre con fecha y hora actual
+        ruta_csv = os.path.join(carpeta, f"escenario_{i}.csv")
+        df_escenario.to_csv(ruta_csv, index=False)
 
     # Guardar y visualizar los resultados de la evaluación 
     df_eval.to_csv(EVAL_CSV_PATH, index=False)
@@ -562,7 +587,7 @@ if __name__ == "__main__":
     print(f"Recompensa total en evaluación: {total_reward:.2f}")
 
     # Guardar gráficos de cada variable de la trayectoria
-    guardar_trayectorias(df_eval)
+    guardar_trayectorias(fecha_hora,df_eval)
     print("Gráficos de trayectoria guardados en la carpeta 'figures'.")
 
     end_time = time.time()
