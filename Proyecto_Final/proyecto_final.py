@@ -1,6 +1,4 @@
 # type: ignore
-# from stable_baselines3 import PPO
-# from stable_baselines3.common.policies import MlpLstmPolicy
 from sb3_contrib import RecurrentPPO
 from sb3_contrib.ppo_recurrent.policies import MlpLstmPolicy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
@@ -99,7 +97,6 @@ class HydroThermalEnv(gym.Env):
     P_SOLAR_MAX = 254 # MW
     P_EOLICO_MAX = 1584.7 # MW
     P_BIOMASA_MAX = 487.3 # MW
-    # to-do: revisar si estos valores son correctos
     P_TERMICO_BAJO_MAX = 500 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
@@ -113,12 +110,10 @@ class HydroThermalEnv(gym.Env):
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
-    # to-do: revisar si estos valores son correctos
     VALOR_EXPORTACION = 0.0 # USD/MWh 
     COSTO_TERMICO_BAJO = 100.0 # USD/MWh 
     COSTO_TERMICO_ALTO = 300.0 # USD/MWh
     COSTO_VERTIMIENTO = 30.0 # USD/MWh
-    # COSTO_OPORT_AGUA = 30.0 # USD/MWh
 
     # cambiar a 0 si queremos usar aportes estocásticos
     DETERMINISTICO = 0
@@ -375,27 +370,9 @@ class HydroThermalEnv(gym.Env):
         info["aportes"] = aporte_paso
         info["vertimiento"] = self.vertimiento
 
-        # Penalización por volumen bajo
-        # penalizacion_vol_bajo = 0
-        # if self.volumen < self.V_CLAIRE_MAX / 2: # Si el volumen es menor a la mitad del máximo
-        #     # Penalización cuadrática para que sea muy dolorosa a niveles bajos
-        #     penalizacion_vol_bajo = 1e7 * ((self.V_CLAIRE_MAX / 2 - self.volumen) / (self.V_CLAIRE_MAX / 2))**2
-
         # Costo por vertimiento
         energia_vertida = self.vertimiento * self.K_CLAIRE
         costo_vertimiento = energia_vertida * self.COSTO_VERTIMIENTO # USD
-
-
-        # Costo de oportunidad del agua por semana (suave)
-        # costo_oportunidad_agua = 0.0
-        # if self.COSTO_OPORT_AGUA > 0.0:
-        #     # Peso estacional (semanas secas dentro de 0..51).
-        #     week = int(self.tiempo % 52)
-        #     s = 1.5 if 46 <= week or week <= 14 else 1.0
-        #     # Peso por estado hidrológico (más seco => mayor valor del agua)
-        #     w = {0: 2.0, 1: 1.5, 2: 1.0, 3: 0.7, 4: 0.5}[int(self.hidrologia)]
-        #     valor_hm3 = self.K_CLAIRE * self.COSTO_OPORT_AGUA * s * w  # USD/hm3
-        #     costo_oportunidad_agua = valor_hm3 * qt
 
         # Recompensa
         reward_usd = - costo_termico - costo_vertimiento  # USD
@@ -438,23 +415,9 @@ class OneHotFlattenObs(gym.ObservationWrapper):
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(dim,), dtype=np.float32)
 
     def observation(self, obs):
-        envu = self.env.unwrapped
-
         # Normalizar volumen
         v = float(obs["volumen"])
         v_norm = v / HydroThermalEnv.V_CLAIRE_MAX
-
-        # Normalizar demanda residual
-        # dem_res_pre = max(envu._demanda() - envu._gen_renovable(), 0.0)
-        # dem_res_norm = dem_res_pre / 178371.0 # MWh
-
-        # aporte = envu._aporte()
-        # aporte_norm = aporte / 137.0 # hm3
-
-        # Normalizar generación hidroeléctrica máxima 
-        # qt_max_sem = min(envu.V_CLAIRE_TUR_MAX, v) # hm3
-        # e_hidro_max_util = min(envu.K_CLAIRE * qt_max_sem, dem_res_pre) # MWh
-        # e_hidro_norm = e_hidro_max_util / (envu.K_CLAIRE * envu.V_CLAIRE_TUR_MAX)
 
         # One-Hot encoding Hidrologia
         h = obs["hidrologia"]
@@ -490,10 +453,6 @@ def entrenar():
         n_lstm_layers=1,
         net_arch=dict(pi=[128], vf=[128]),
     )
-
-    # Schedule lineal de LR: empieza en 3e-4 y va a 0
-    def lr_schedule(progress_remaining: float) -> float:
-        return 3e-4 * progress_remaining
 
     model = RecurrentPPO(
         MlpLstmPolicy,
