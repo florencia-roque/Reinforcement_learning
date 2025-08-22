@@ -25,6 +25,7 @@ class LiveRewardPlotter:
         self.ax.set_xlabel("Episodio")
         self.ax.set_ylabel("Recompensa")
         self.ax.set_title(title)
+        self.ax.grid(True)
 
         (self.line,) = self.ax.plot([], [], lw=1, label="Reward")
         (self.line_avg,) = self.ax.plot([], [], lw=2, label=f"Media móvil ({window})")
@@ -98,7 +99,9 @@ class HydroThermalEnv(gym.Env):
 
         self.alpha = 0.001   # learning rate
         self.gamma = 0.99  # discount
-        self.epsilon = 0.001 # exploración
+        self.min_epsilon = 0.01 # exploración
+        self.max_epsilon = 1.0
+        self.decay_rate = 0
 
         # Espacio de observación
         self.observation_space = spaces.Discrete(self.N_STATES)
@@ -189,8 +192,8 @@ class HydroThermalEnv(gym.Env):
         # calculo la media de los aportes para la semana y eshy actual
         aportes_promedio = np.mean(aportes) # hm3/h
 
-        rango_valido_inf = aportes_promedio-aportes_promedio*0.1
-        rango_valido_sup = aportes_promedio+aportes_promedio*0.1
+        rango_valido_inf = aportes_promedio-aportes_promedio*0.05
+        rango_valido_sup = aportes_promedio+aportes_promedio*0.05
 
         # me quedo con los aportes que estén en el promedio +/- 10% 
         aportes_validos = aportes[(aportes>=rango_valido_inf) & (aportes<=rango_valido_sup)] # hm3/h
@@ -220,7 +223,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]*1.3
+            return energias_demandas.iloc[self.tiempo]*1.2
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -300,10 +303,12 @@ class HydroThermalEnv(gym.Env):
         assert self.action_space.contains(action), f"Acción inválida: {action}"
 
         # Volumen a turbinar
+
         frac = action /  (self.N_ACTIONS-1)   # mapea a 0.0, 0.25, 0.5, 0.75, 1.0
 
-        v_max = min(self.volumen, self.V_CLAIRE_TUR_MAX) #hm3
-        v_turb = frac * v_max #hm3
+        accion_turbinado = frac*self.V_CLAIRE_TUR_MAX
+        v_turb = min(self.volumen,accion_turbinado) #hm3
+        # v_turb = frac * v_max #hm3
 
         # despacho: e_eolo + e_sol + e_bio + e_termico + e_hidro = dem + exp
         ingreso_exportacion, energia_exportada, costo_termico, energia_termico_bajo, energia_termico_alto = self._despachar(v_turb)
@@ -408,7 +413,7 @@ def entrenar(env):
     t0 = time.perf_counter()
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 5000
+    total_episodes = 50000
 
     plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
 
@@ -424,9 +429,17 @@ def entrenar(env):
         done = False
         reward_episodio = 0.0
 
+        # if episode < 10:
+        #     epsilon = 0.1  # explorar completamente
+        # else:
+        #     epsilon = inner_env.min_epsilon + (inner_env.max_epsilon - inner_env.min_epsilon) * np.exp(-inner_env.decay_rate * (episode - 10))
+
+        epsilon = 0.01
         while not done:
-            # e-greedy
-            if np.random.rand() < inner_env.epsilon:
+            # 1 con probabilidad epsilon
+            explorar = np.random.binomial(1,epsilon)
+
+            if explorar == 1:
                 a = np.random.randint(inner_env.N_ACTIONS)
             else:
                 a = np.argmax(inner_env.Q[inner_env.idx])
@@ -451,7 +464,7 @@ def entrenar(env):
     plotter.close()
     return inner_env.Q
 
-def evaluar_modelo(eval_env, Q, num_pasos=103, n_eval_episodes=100):
+def evaluar_modelo(eval_env, Q, num_pasos=103, n_eval_episodes=1):
     resultados_todos_episodios = []
     recompensa_total = []
 
