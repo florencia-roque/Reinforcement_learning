@@ -106,8 +106,8 @@ class HydroThermalEnv(gym.Env):
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 40859.4 # hm3
-    V0 = V_CLAIRE_MAX / 3 # hm3
+    V_CLAIRE_MAX = 60000 # hm3
+    V0 = V_CLAIRE_MAX * 0.75 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
@@ -116,9 +116,12 @@ class HydroThermalEnv(gym.Env):
     # to-do: revisar si estos valores son correctos
     VALOR_EXPORTACION = 0.0 # USD/MWh 
     COSTO_TERMICO_BAJO = 100.0 # USD/MWh 
-    COSTO_TERMICO_ALTO = 600.0 # USD/MWh
+    COSTO_TERMICO_ALTO = 300.0 # USD/MWh
     COSTO_VERTIMIENTO = 30.0 # USD/MWh
-    COSTO_OPORT_AGUA = 30.0 # USD/MWh
+    # COSTO_OPORT_AGUA = 30.0 # USD/MWh
+
+    # cambiar a 0 si queremos usar aportes estocásticos
+    DETERMINISTICO = 0
 
     def __init__(self):
         # Espacio de observación
@@ -133,6 +136,8 @@ class HydroThermalEnv(gym.Env):
 
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
+
+        self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
         
         # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
@@ -199,22 +204,43 @@ class HydroThermalEnv(gym.Env):
         return hidrologia_siguiente
 
     def _aporte(self):
-        # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, 
-        # sorteo una ocurrencia de aportes para el lago claire
-        estados = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
+        # guardo fila de estados para la semana actual
+        estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
-        coincidencias = (estados == self.hidrologia)
-        columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] 
+        # guardo las columnas que tienen el eshy actual
+        coincidencias = (estados_t == self.hidrologia)
+        cronicas_coincidentes = coincidencias[coincidencias].index
 
-        if len(columnas_validas) == 0:
-            raise ValueError("No hay coincidencias válidas para los estados hidrológicos actuales")
+        # con las cronicas coincidentes tengo que obtener los aportes para la semana y eshy actual
+        aportes = self.data_matriz_aportes_claire.loc[self.tiempo % 52, cronicas_coincidentes] # hm3/h
+
+        # calculo la media de los aportes para la semana y eshy actual
+        aportes_promedio = np.mean(aportes) # hm3/h
+
+        rango_valido_inf = aportes_promedio-aportes_promedio*0.05
+        rango_valido_sup = aportes_promedio+aportes_promedio*0.05
+
+        # me quedo con los aportes que estén en el promedio +/- 10% 
+        aportes_validos = aportes[(aportes>=rango_valido_inf) & (aportes<=rango_valido_sup)] # hm3/h
+
+        # si aportes_validos es vacio tomo como aporte valido el promedio de aportes
+        if aportes_validos.empty:
+            aporte_final = aportes_promedio
+        else:
+        # sorteo uniformemente uno de los validos
+            aporte_final = self.np_random.choice(aportes_validos)
         
-        # USAR el RNG del env:
-        año_sorteado = self.np_random.choice(columnas_validas)
-
-        # Obtener valor en claire para fila2 y ese año
-        valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado] # hm3/h
-        return valor_claire * 168
+        valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/semana
+       
+        if pd.isna(valor):
+            valor = 0.0
+            print("OJO OJO OJO no encontro valor de aporte determnistico")
+            print("paso: ", self.tiempo)
+ 
+        if(self.DETERMINISTICO == 1):    
+            return valor
+        else:
+            return aporte_final * 168
     
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
@@ -475,8 +501,6 @@ def entrenar():
         policy_kwargs=policy_kwargs,
         verbose=1,
         n_steps=52,         # 1 episodio por actualización
-        batch_size=416,      # n_envs * n_steps = 4*104
-        n_epochs=8,          # más pasadas para aprovechar el batch
         gamma=0.999,         # mira mas lejos
         ent_coef=0.005,      # evita colapso temprano a extremos
         learning_rate=3e-4,
@@ -484,7 +508,7 @@ def entrenar():
     )
 
     # calcular total_timesteps: por ejemplo 3000 episodios * 104 pasos
-    total_episodes = 2_000
+    total_episodes = 3_000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     callback = LivePlotCallback(plot_every=1)
