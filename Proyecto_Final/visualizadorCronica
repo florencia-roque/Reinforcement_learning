@@ -1,0 +1,75 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from tkinter import Tk, filedialog
+import unicodedata
+
+# === Función para normalizar nombres de columnas ===
+def normalizar_columna(col):
+    col = col.lower().replace(" ", "_")
+    col = ''.join(c for c in unicodedata.normalize('NFD', col) if unicodedata.category(c) != 'Mn')
+    return col
+
+
+# === Abrir un file chooser ===
+root = Tk()
+root.withdraw()  # Oculta la ventana principal de Tkinter
+file_path = filedialog.askopenfilename(
+    title="Selecciona el archivo CSV",
+    filetypes=[("Archivos CSV", "*.csv"), ("Todos los archivos", "*.*")]
+)
+
+if not file_path:
+    print("No se seleccionó ningún archivo.")
+    exit()
+
+# === Leer el archivo CSV ===
+df = pd.read_csv(file_path, sep=",", engine="python")  # cambia sep=";" por "," si es necesario
+df.columns = [c.strip().lower() for c in df.columns]  # normaliza nombres
+
+# === Definir columnas (ajusta según tu CSV) ===
+col_turbinada = "energia_turbinada"
+col_renovable = "energia_renovable"  # cuidado si en tu CSV aparece como "renobable"
+col_termico_alto = "energia_termico_alto"
+col_termico_bajo = "energia_termico_bajo"
+col_demanda = "demanda"
+col_aportes = "aportes"
+
+# Eje X (puede ser "tiempo", "semana", etc.)
+x = df.index  # si tenés una columna de fechas/tiempo, reemplaza por df["tiempo"]
+
+# === Crear la figura ===
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Áreas apiladas
+stack_labels = [col_turbinada, col_renovable, col_termico_bajo, col_termico_alto]
+ax.stackplot(
+    x,
+    df[col_turbinada],
+    df[col_renovable],
+    df[col_termico_bajo],
+    df[col_termico_alto],
+    labels=stack_labels
+)
+ax.set_ylabel("Energía (áreas apiladas)")
+
+# Demanda como línea en el mismo eje
+ax.plot(x, df[col_demanda], label="Demanda", color="black", linewidth=2)
+
+# Aportes en el eje secundario
+ax2 = ax.twinx()
+ax2.plot(x, df[col_aportes], label="Aportes", color="green", linestyle="--")
+
+# Títulos y etiquetas
+ax.set_title("Generación (áreas apiladas) y Demanda (línea) vs Aportes (eje secundario)")
+ax.set_xlabel("Tiempo")
+ax.set_ylabel("Energía (Generación y Demanda)")
+ax2.set_ylabel("Aportes")
+
+# Leyenda combinada
+handles1, labels1 = ax.get_legend_handles_labels()
+handles2, labels2 = ax2.get_legend_handles_labels()
+ax.legend(handles1 + handles2, labels1 + labels2, loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=3)
+
+
+plt.tight_layout()
+plt.show()
