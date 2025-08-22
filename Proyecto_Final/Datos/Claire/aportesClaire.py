@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 
-
 # Levanto datos historicos de los aportes del proceso estocastico "Historico_Markov_2025_116c"
-rutaArchivo = 'Datos\Claire\datosProcHistorico2.xlt'
+rutaArchivo = '.\datosProcHistorico.xlt'
 df = pd.read_csv(rutaArchivo, sep=r'\s+', header=7, encoding='cp1252')
 df['APORTE-SALTO'] = df['APORTE-SALTO']
 
@@ -78,12 +77,9 @@ for i in range(len(semanas)-1):
     fila = [i] + matriz[1].flatten().tolist()  # aplana la matriz y agrega el índice
     filas.append(fila)
 
-
 n_clases = 5
 columnas = ['Semana'] + [f'{i}-{j}' for i in range(n_clases) for j in range(n_clases)]
 df_resultado = pd.DataFrame(filas, columns=columnas)
 df_resultado.to_csv('matrices_sem.csv', index=False, header=True)
-
-
 
 

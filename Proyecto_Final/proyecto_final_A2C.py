@@ -2,7 +2,6 @@
 from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
-
 import os
 import time
 import numpy as np
@@ -71,9 +70,6 @@ class LivePlotCallback(BaseCallback):
         plt.ioff()
         plt.show()
 
-
-# to-do: Rodrigo aconsejo usar actorCritic (con one-hot encoding para las variables discretas) para las acciones continuas, si no converge discretizar el volumen del turbinado (ejemplo 10 niveles) y usar metodos tabulares (QLearning)
-
 # Leer archivo 
 def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
     if rutaArchivo.endswith('.xlsx') or rutaArchivo.endswith('.xls'):
@@ -82,8 +78,6 @@ def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
         return pd.read_csv(rutaArchivo, sep=sep, header=header, encoding='cp1252')
 
 class HydroThermalEnv(gym.Env):
-
-    DETERMINISTICO = 1
     T0 = 0
     T_MAX = 103
     N_HIDRO = 5
@@ -92,24 +86,26 @@ class HydroThermalEnv(gym.Env):
     P_SOLAR_MAX = 254 # MW
     P_EOLICO_MAX = 1584.7 # MW
     P_BIOMASA_MAX = 487.3 # MW
-    # to-do: revisar si estos valores son correctos
+    
     P_TERMICO_BAJO_MAX = 500 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
 
     V_CLAIRE_MIN = 0 # hm3
-    V_CLAIRE_MAX = 12500 * 20 # hm3
-    V0 = V_CLAIRE_MAX / 20 # hm3
+    V_CLAIRE_MAX = 60000 # hm3
+    V0 = V_CLAIRE_MAX * 0.75 # hm3
     
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
-    # to-do: revisar si estos valores son correctos
-    VALOR_EXPORTACION = 1 # USD/MWh 
+    VALOR_EXPORTACION = 0 # USD/MWh 
     COSTO_TERMICO_BAJO = 100 # USD/MWh
     COSTO_TERMICO_ALTO = 300 # USD/MWh
+
+    # cambiar a 0 si queremos usar aportes estocásticos
+    DETERMINISTICO = 0
 
     def __init__(self):
         # Espacio de observación
@@ -155,7 +151,6 @@ class HydroThermalEnv(gym.Env):
             array_1d = self.data_matrices_hidrologicas.iloc[i, :].values
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
- 
         self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
         # Inicializar variables internas
         self.reset()
@@ -179,7 +174,6 @@ class HydroThermalEnv(gym.Env):
         # h0 = self.data_matriz_aportes_discreta.iloc[self.T0, self.cronica]
         return np.int64(2)
 
-    # to do: revisar método
     def _siguiente_hidrologia(self):
         # retorna el estado hidrológico siguiente 0,1,2,3,4
         self.hidrologia_anterior = self.hidrologia
@@ -188,29 +182,34 @@ class HydroThermalEnv(gym.Env):
         return hidrologia_siguiente
 
     def _aporte(self):
-        # dados dos estados (inicial y final) y dos semanas correspondientes a esos estados, 
-        # sorteo una ocurrencia de aportes para el lago claire
-        estados = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
+        # guardo fila de estados para la semana actual
+        estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
-        coincidencias = (estados == self.hidrologia)
-        columnas_validas = self.data_matriz_aportes_discreta.columns[coincidencias] 
+        # guardo las columnas que tienen el eshy actual
+        coincidencias = (estados_t == self.hidrologia)
+        cronicas_coincidentes = coincidencias[coincidencias].index
 
-        if len(columnas_validas) == 0:
-            raise ValueError("No hay coincidencias válidas para los estados hidrológicos actuales")
-            
-        año_sorteado = np.random.choice(columnas_validas)
+        # con las cronicas coincidentes tengo que obtener los aportes para la semana y eshy actual
+        aportes = self.data_matriz_aportes_claire.loc[self.tiempo % 52, cronicas_coincidentes] # hm3/h
 
-        # Obtener valor en claire para fila2 y ese año
-        valor_claire = self.data_matriz_aportes_claire.loc[self.tiempo % 52, año_sorteado] # hm3/h
+        # calculo la media de los aportes para la semana y eshy actual
+        aportes_promedio = np.mean(aportes) # hm3/h
 
-        # print("columnas y head de aportes_deterministicos")
-        # print(self.aportes_deterministicos.head())
-        # print(self.aportes_deterministicos.columns)
+        rango_valido_inf = aportes_promedio-aportes_promedio*0.05
+        rango_valido_sup = aportes_promedio+aportes_promedio*0.05
 
-        #PRUEBA PARA VER DONDE ESTA EL ERROR, SE DERTERMINIZAN LOS APORTES A VER SI DA ALGO COHERENTE
-        #return valor_claire * 168
-        valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/h
+        # me quedo con los aportes que estén en el promedio +/- 10% 
+        aportes_validos = aportes[(aportes>=rango_valido_inf) & (aportes<=rango_valido_sup)] # hm3/h
+
+        # si aportes_validos es vacio tomo como aporte valido el promedio de aportes
+        if aportes_validos.empty:
+            aporte_final = aportes_promedio
+        else:
+        # sorteo uniformemente uno de los validos
+            aporte_final = self.np_random.choice(aportes_validos)
         
+        valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/semana
+       
         if pd.isna(valor):
             valor = 0.0
             print("OJO OJO OJO no encontro valor de aporte determnistico")
@@ -218,15 +217,14 @@ class HydroThermalEnv(gym.Env):
 
         if(self.DETERMINISTICO == 1):    
             return valor
-        else: 
-            return valor_claire * 168
-        
-        return valor
+        else:
+            return aporte_final * 168
+
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo]*1.
+            return energias_demandas.iloc[self.tiempo]*1.2
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -415,7 +413,7 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=12, learning_rate=5e-4)
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 600
+    total_episodes = 10000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     model.learn(total_timesteps=total_timesteps, callback=callback)
