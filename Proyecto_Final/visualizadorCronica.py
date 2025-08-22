@@ -26,7 +26,7 @@ df.columns = [normalizar_columna(c) for c in df.columns]
 print("Columnas normalizadas:", df.columns.tolist())
 
 # === Definir columnas ===
-col_turbinada = "energia_turbinada"
+col_turbinada = "energia_hidro"
 col_renovable = "energia_renovable"
 col_termico_bajo = "energia_termico_bajo"
 col_termico_alto = "energia_termico_alto"
