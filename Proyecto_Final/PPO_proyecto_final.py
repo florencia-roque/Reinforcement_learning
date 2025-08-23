@@ -116,7 +116,7 @@ class HydroThermalEnv(gym.Env):
     COSTO_VERTIMIENTO = 30.0 # USD/MWh
 
     # cambiar a 0 si queremos usar aportes estocásticos
-    DETERMINISTICO = 1
+    DETERMINISTICO = 0
 
     def __init__(self):
         # Espacio de observación
@@ -520,7 +520,7 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
             obs, rewards, dones, infos = eval_env.step(action)
 
             # Extrae el primer env (usas n_envs=1)
-            a = int(np.asarray(action).reshape(-1)[0])
+            a = float(np.asarray(action).reshape(-1)[0])
             r = float(np.asarray(rewards).reshape(-1)[0])
             info = infos[0] if isinstance(infos, (list, tuple)) else infos
             

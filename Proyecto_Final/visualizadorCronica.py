@@ -64,7 +64,7 @@ ax2.plot(x, df[col_volumen], label="Volumen", color="purple", linestyle="--")
 
 
 # Hidrología como puntos (re-escalada por 1000)
-# ax2.scatter(x, df[col_hidrologia] * 1000, label="Hidrología (x1000)", color="black", marker="o")
+ax2.scatter(x, df[col_hidrologia] * 10000, label="Hidrología (x1000)", color="black", marker="o")
 
 # Títulos y etiquetas
 ax.set_title("Generación apilada + Demanda (eje izq) / Aportes e Hidrología (eje der)")
