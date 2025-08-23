@@ -116,7 +116,7 @@ class HydroThermalEnv(gym.Env):
     COSTO_VERTIMIENTO = 30.0 # USD/MWh
 
     # cambiar a 0 si queremos usar aportes estocásticos
-    DETERMINISTICO = 0
+    DETERMINISTICO = 1
 
     def __init__(self):
         # Espacio de observación
@@ -549,9 +549,13 @@ def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
             
     return df_avg, df_all
 
-def guardar_trayectorias(df_trayectorias, output_dir="figures"):
+def guardar_trayectorias(fecha_hora, df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    fig_fecha_hora = os.path.join(output_dir, f"resultados_{fecha_hora}")
+    if not os.path.exists(fig_fecha_hora):
+        os.makedirs(fig_fecha_hora)
 
     # Función auxiliar para “aplanar” valores a escalares cuando sea posible
     def to_scalar(v):
@@ -594,7 +598,7 @@ def guardar_trayectorias(df_trayectorias, output_dir="figures"):
             ax.set_xlabel("Semanas")
             ax.grid(True)
             nombre_figura = f"{col}.png"
-            fig.savefig(os.path.join(output_dir, nombre_figura))
+            fig.savefig(os.path.join(fig_fecha_hora, nombre_figura))
             plt.close(fig)
         except Exception as e:
             print(f"No se pudo graficar columna {col}: {e}")
@@ -694,7 +698,7 @@ if __name__ == "__main__":
     print(f"Recompensa total en evaluación: {total_reward:.2f}")
 
     # Guardar gráficos de cada variable de la trayectoria
-    guardar_trayectorias(df_eval)
+    guardar_trayectorias(fecha_hora,df_eval)
     print("Gráficos de trayectoria guardados en la carpeta 'figures'.")
 
     end_time = time.time()
