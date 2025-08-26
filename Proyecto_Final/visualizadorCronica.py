@@ -1,0 +1,81 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from tkinter import Tk, filedialog
+import unicodedata
+
+# === Función para normalizar nombres de columnas ===
+def normalizar_columna(col):
+    col = col.lower().replace(" ", "_")
+    col = ''.join(c for c in unicodedata.normalize('NFD', col) if unicodedata.category(c) != 'Mn')
+    return col
+
+# === Abrir file chooser ===
+root = Tk()
+root.withdraw()
+file_path = filedialog.askopenfilename(
+    title="Selecciona el archivo CSV",
+    filetypes=[("Archivos CSV", "*.csv"), ("Todos los archivos", "*.*")]
+)
+if not file_path:
+    print("No se seleccionó ningún archivo.")
+    exit()
+
+# === Leer CSV y normalizar columnas ===
+df = pd.read_csv(file_path, sep=",", engine="python")
+df.columns = [normalizar_columna(c) for c in df.columns]
+print("Columnas normalizadas:", df.columns.tolist())
+
+# === Definir columnas ===
+col_turbinada = "energia_turbinada"
+col_renovable = "energia_renovable"
+col_termico_bajo = "energia_termico_bajo"
+col_termico_alto = "energia_termico_alto"
+col_demanda = "demanda"
+col_aportes = "aportes"
+col_hidrologia = "hidrologia"
+col_volumen = "volumen"
+
+# Eje X
+x = df.index  # si tenés columna de tiempo, usala acá -> df["tiempo"]
+
+# === Crear figura ===
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Áreas apiladas (energías)
+stack_labels = [col_turbinada, col_renovable, col_termico_bajo, col_termico_alto]
+ax.stackplot(
+    x,
+    df[col_turbinada],
+    df[col_renovable],
+    df[col_termico_bajo],
+    df[col_termico_alto],
+    labels=stack_labels
+)
+
+# Demanda en el eje principal
+ax.plot(x, df[col_demanda], label="Demanda", color="black", linewidth=2)
+
+# Eje secundario para aportes e hidrología
+ax2 = ax.twinx()
+
+# Aportes como línea
+ax2.plot(x, df[col_aportes], label="Aportes", color="pink", linestyle="--")
+ax2.plot(x, df[col_volumen], label="Volumen", color="purple", linestyle="--")
+
+
+# Hidrología como puntos (re-escalada por 1000)
+# ax2.scatter(x, df[col_hidrologia] * 1000, label="Hidrología (x1000)", color="black", marker="o")
+
+# Títulos y etiquetas
+ax.set_title("Generación apilada + Demanda (eje izq) / Aportes e Hidrología (eje der)")
+ax.set_xlabel("Tiempo")
+ax.set_ylabel("Energía (Generación y Demanda)")
+ax2.set_ylabel("Aportes / Hidrología (escala x1000)")
+
+# Leyenda combinada
+handles1, labels1 = ax.get_legend_handles_labels()
+handles2, labels2 = ax2.get_legend_handles_labels()
+ax.legend(handles1 + handles2, labels1 + labels2, loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=4)
+
+plt.tight_layout()
+plt.show()
