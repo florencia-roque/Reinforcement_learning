@@ -32,11 +32,10 @@ col_termico_bajo = "energia_termico_bajo"
 col_termico_alto = "energia_termico_alto"
 col_demanda = "demanda"
 col_aportes = "aportes"
-col_hidrologia = "hidrologia"
 col_volumen = "volumen"
 
 # Eje X
-x = df.index  # si tenés columna de tiempo, usala acá -> df["tiempo"]
+x = df.index
 
 # === Crear figura ===
 fig, ax = plt.subplots(figsize=(12, 6))
@@ -55,22 +54,18 @@ ax.stackplot(
 # Demanda en el eje principal
 ax.plot(x, df[col_demanda], label="Demanda", color="black", linewidth=2)
 
-# Eje secundario para aportes e hidrología
+# Eje secundario para volumen y aportes
 ax2 = ax.twinx()
 
 # Aportes como línea
 ax2.plot(x, df[col_aportes], label="Aportes", color="pink", linestyle="--")
 ax2.plot(x, df[col_volumen], label="Volumen", color="purple", linestyle="--")
 
-
-# Hidrología como puntos (re-escalada por 1000)
-# ax2.scatter(x, df[col_hidrologia] * 1000, label="Hidrología (x1000)", color="black", marker="o")
-
 # Títulos y etiquetas
-ax.set_title("Generación apilada + Demanda (eje izq) / Aportes e Hidrología (eje der)")
-ax.set_xlabel("Tiempo")
-ax.set_ylabel("Energía (Generación y Demanda)")
-ax2.set_ylabel("Aportes / Hidrología (escala x1000)")
+ax.set_title("Energías: Generación y Demanda (eje izq) / Volumen y Aportes (eje der)")
+ax.set_xlabel("Semana")
+ax.set_ylabel("Energía [MWh]")
+ax2.set_ylabel("Volumen [hm3] y Aportes [hm3/semana]")
 
 # Leyenda combinada
 handles1, labels1 = ax.get_legend_handles_labels()
