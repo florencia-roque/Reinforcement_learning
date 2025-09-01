@@ -592,7 +592,7 @@ if __name__ == "__main__":
     print(f"Resultados de la evaluación guardados en {EVAL_CSV_PATH}")
 
     # Guardar energias en un mismo csv
-    df_energias = df_eval.loc[:, ["energia_turbinada", "energia_eolica", "energia_solar", "energia_biomasa", "energia_renovable", "energia_termico_bajo", "energia_termico_alto", "demanda", "demanda_residual"]]
+    df_energias = df_eval.loc[:, ["energia_hidro", "energia_eolica", "energia_solar", "energia_biomasa", "energia_renovable", "energia_termico_bajo", "energia_termico_alto", "demanda", "demanda_residual"]]
     df_energias.to_csv(EVAL_CSV_ENERGIAS_PATH, index=False)
     print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
 
