@@ -14,7 +14,7 @@ matplotlib.use("TkAgg")
 
 # --- Plotter simple de recompensas por episodio ---
 class LiveRewardPlotter:
-    def __init__(self, window=100, refresh_every=10, title="Recompensa por episodio"):
+    def __init__(self, window=100, refresh_every=10):
         self.window = window
         self.refresh_every = refresh_every
         self.rewards_ep = []
@@ -23,8 +23,8 @@ class LiveRewardPlotter:
         plt.ion()
         self.fig, self.ax = plt.subplots()
         self.ax.set_xlabel("Episodio")
-        self.ax.set_ylabel("Recompensa")
-        self.ax.set_title(title)
+        self.ax.set_ylabel("Recompensa por episodio")
+        self.ax.set_title("Entrenamiento del Agente")
         self.ax.grid(True)
 
         (self.line,) = self.ax.plot([], [], lw=1, label="Reward")

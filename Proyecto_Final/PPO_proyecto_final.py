@@ -33,6 +33,7 @@ class LivePlotCallback(BaseCallback):
         self.fig, self.ax = plt.subplots(figsize=(10, 8))
         self.ax.set_xlabel("Episodio")
         self.ax.set_ylabel("Recompensa por episodio")
+        self.ax.set_title("Entrenamiento del Agente")
         self.ax.grid(True)
 
         self.line, = self.ax.plot([], [], lw=1, label="Reward")
