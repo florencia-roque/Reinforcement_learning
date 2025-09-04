@@ -77,7 +77,7 @@ class HydroThermalEnv(gym.Env):
 
     V_CLAIRE_MIN = 0 # hm3
     V_CLAIRE_MAX = 60000 # hm3
-    V0 = V_CLAIRE_MAX * 0.75# hm3
+    V0 = V_CLAIRE_MAX * 0.75 # hm3
 
     K_CLAIRE = P_CLAIRE_MAX / Q_CLAIRE_MAX # MWh/hm3
 
