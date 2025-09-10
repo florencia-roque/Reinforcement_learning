@@ -86,13 +86,16 @@ class LivePlotCallback(BaseCallback):
 def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
     if rutaArchivo.endswith('.xlsx') or rutaArchivo.endswith('.xls'):
         return pd.read_excel(rutaArchivo, header=header,sheet_name=sheet_name)
-    else:
+    elif rutaArchivo.endswith('csv'):
         return pd.read_csv(rutaArchivo, sep=sep, header=header, encoding='cp1252')
+    # elif rutaArchivo.endswith('xlt'):
+    #     return pd.read_csv(rutaArchivo, sep=sep, header=header, engine="python", encoding='latin-1')
 
 class HydroThermalEnv(gym.Env):
     T0 = 0
-    T_MAX = 103
+    T_MAX = 155
     N_HIDRO = 5
+    veces=0
 
     P_CLAIRE_MAX = 1541 # MW
     P_SOLAR_MAX = 254 # MW
@@ -117,9 +120,12 @@ class HydroThermalEnv(gym.Env):
     COSTO_VERTIMIENTO = 30.0 # USD/MWh
 
     # cambiar a 0 si queremos usar aportes estocásticos
-    DETERMINISTICO = 1
+    DETERMINISTICO = 0
+
+    MODO_EVALUACION = "historico"
 
     def __init__(self):
+
         # Espacio de observación
         self.observation_space = spaces.Dict({
             "volumen": spaces.Box(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, shape=(), dtype=np.float32),
@@ -129,25 +135,15 @@ class HydroThermalEnv(gym.Env):
         
         # Espacio de acción continuo: fracción de turbinado en [0, 1]
         self.action_space = spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32)
-
-        # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
-        self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
-
-        self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
-        
-        # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
-        self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
-        # convertir a unidad hm3/h
-        self.data_matriz_aportes_claire = self.data_matriz_aportes_claire * 3600 / 1e6
         
         # Cargar datos de energías renovables y demanda
-        self.data_biomasa = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=0)
+        self.data_biomasa = leer_archivo(f"Datos\\MOP\\Deterministicos3anios.xlsx", header=0, sheet_name=0)
         self.data_biomasa = self.data_biomasa.iloc[:,1:]
-        self.data_eolico = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=1)
+        self.data_eolico = leer_archivo(f"Datos\\MOP\\Deterministicos3anios.xlsx", header=0, sheet_name=1)
         self.data_eolico = self.data_eolico.iloc[:,1:]
-        self.data_solar = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=2)
+        self.data_solar = leer_archivo(f"Datos\\MOP\\Deterministicos3anios.xlsx", header=0, sheet_name=2)
         self.data_solar = self.data_solar.iloc[:,1:]
-        self.data_demanda = leer_archivo(f"Datos\\MOP\\Deterministicos.xlsx", header=0, sheet_name=3)
+        self.data_demanda = leer_archivo(f"Datos\\MOP\\Deterministicos3anios.xlsx", header=0, sheet_name=3)
         self.data_demanda = self.data_demanda.iloc[:,1:]
 
         # Agregar columna con promedio de crónicas
@@ -155,6 +151,16 @@ class HydroThermalEnv(gym.Env):
         self.data_eolico["PROMEDIO"] = self.data_eolico.mean(axis=1)
         self.data_solar["PROMEDIO"] = self.data_solar.mean(axis=1)
         self.data_demanda["PROMEDIO"] = self.data_demanda.mean(axis=1)
+
+        # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
+        self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
+
+        # self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
+        
+        # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
+        self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
+        # convertir a unidad hm3/h
+        self.data_matriz_aportes_claire = self.data_matriz_aportes_claire * 3600 / 1e6
 
         # Cargar datos de matrices hidrológicas con las probabilidades de transición entre estados
         self.data_matrices_hidrologicas = leer_archivo(f"Datos\\Claire\\matrices_sem.csv", sep=",", header=0)
@@ -164,12 +170,26 @@ class HydroThermalEnv(gym.Env):
             array_1d = self.data_matrices_hidrologicas.iloc[i, :].values
             self.matrices_hidrologicas[i] = array_1d.reshape(5, 5) 
 
-        # Inicializar variables internas
-        self.reset()
+        # Leer archivo de aportes historicos
+        self.datos_historicos = leer_archivo(f"Datos\\MARKOV\\Salidas\\MARKOV_CLAIRE_HIST\\datosHistoricosAportes.xlsx", header=7)
+
+        self.indice_inicial_episodio = 0
+        self.episodios_recorridos = 0
+
+        # # Inicializar variables internas
+        # self.reset()
+
 
     def reset(self, seed=None, options=None):
         # IMPORTANTE: inicializa el RNG del entorno
         super().reset(seed=seed)
+
+        self.modo = self.MODO_EVALUACION
+        self.indice_inicial_episodio = self.episodios_recorridos*52
+        self.episodios_recorridos += 1
+
+        if self.modo not in {"markov", "historico"}:
+            raise ValueError("modo debe ser 'markov' u 'historico'")
 
         self.volumen = self.V0
         self.tiempo = 0
@@ -181,68 +201,90 @@ class HydroThermalEnv(gym.Env):
             "hidrologia_inicial": self.hidrologia,
             "tiempo_inicial": self.tiempo
         }
+        print("llamada: ", self.veces)
+        self.veces+=1
         return self._get_obs(), info
     
     def _inicial_hidrologia(self):
-        # retorna el estado inicial del estado hidrológico 0,1,2,3,4
-        return np.int64(2)
+        if self.modo == "markov":
+            # retorna el estado inicial del estado hidrológico 0,1,2,3,4
+            return np.int64(2)
+        else:
+            try:
+                # modo datos historicos
+                return self.datos_historicos.iloc[self.indice_inicial_episodio,3]
+            except:
+                return 0
 
     def _siguiente_hidrologia(self):
-        # retorna el estado hidrológico siguiente 0,1,2,3,4
         self.hidrologia_anterior = self.hidrologia
-        # array con las clases 0,1,2,3,4
-        clases = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0])
-        # USAR el RNG del env (no el global):
-        hidrologia_siguiente = self.np_random.choice(
-            clases, 
-            p=self.matrices_hidrologicas[self.tiempo % 52][self.hidrologia,:]
-        )
-        return hidrologia_siguiente
+        if self.modo == "markov":
+            # retorna el estado hidrológico siguiente 0,1,2,3,4
+            # array con las clases 0,1,2,3,4
+            clases = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0])
+            # USAR el RNG del env (no el global):
+            hidrologia_siguiente = self.np_random.choice(
+                clases, 
+                p=self.matrices_hidrologicas[self.tiempo % 52][self.hidrologia,:]
+            )
 
-    def _aporte(self):
-        # guardo fila de estados para la semana actual
-        estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
-
-        # guardo las columnas que tienen el eshy actual
-        coincidencias = (estados_t == self.hidrologia)
-        cronicas_coincidentes = coincidencias[coincidencias].index
-
-        # con las cronicas coincidentes tengo que obtener los aportes para la semana y eshy actual
-        aportes = self.data_matriz_aportes_claire.loc[self.tiempo % 52, cronicas_coincidentes] # hm3/h
-
-        # calculo la media de los aportes para la semana y eshy actual
-        aportes_promedio = np.mean(aportes) # hm3/h
-
-        rango_valido_inf = aportes_promedio-aportes_promedio*0.05
-        rango_valido_sup = aportes_promedio+aportes_promedio*0.05
-
-        # me quedo con los aportes que estén en el promedio +/- 10% 
-        aportes_validos = aportes[(aportes>=rango_valido_inf) & (aportes<=rango_valido_sup)] # hm3/h
-
-        # si aportes_validos es vacio tomo como aporte valido el promedio de aportes
-        if aportes_validos.empty:
-            aporte_final = aportes_promedio
         else:
-        # sorteo uniformemente uno de los validos
-            aporte_final = self.np_random.choice(aportes_validos)
+            # modo datos historicos
         
-        valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/semana
-       
-        if pd.isna(valor):
-            valor = 0.0
-            print("OJO OJO OJO no encontro valor de aporte determnistico")
-            print("paso: ", self.tiempo)
- 
-        if(self.DETERMINISTICO == 1):    
-            return valor
-        else:
-            return aporte_final * 168
+            hidrologia_siguiente = self.datos_historicos.iloc[self.indice_inicial_episodio + self.tiempo, 3] 
+
+        return hidrologia_siguiente
     
+    def _aporte(self):
+        if self.modo == "markov":
+            # guardo fila de estados para la semana actual
+            estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
+
+            # guardo las columnas que tienen el eshy actual
+            coincidencias = (estados_t == self.hidrologia)
+            cronicas_coincidentes = coincidencias[coincidencias].index
+
+            # con las cronicas coincidentes tengo que obtener los aportes para la semana y eshy actual
+            aportes = self.data_matriz_aportes_claire.loc[self.tiempo % 52, cronicas_coincidentes] # hm3/h
+
+            # calculo la media de los aportes para la semana y eshy actual
+            aportes_promedio = np.mean(aportes) # hm3/h
+
+            rango_valido_inf = aportes_promedio-aportes_promedio*0.05
+            rango_valido_sup = aportes_promedio+aportes_promedio*0.05
+
+            # me quedo con los aportes que estén en el promedio +/- 10% 
+            aportes_validos = aportes[(aportes>=rango_valido_inf) & (aportes<=rango_valido_sup)] # hm3/h
+
+            # si aportes_validos es vacio tomo como aporte valido el promedio de aportes
+            if aportes_validos.empty:
+                aporte_final = aportes_promedio
+            else:
+            # sorteo uniformemente uno de los validos
+                aporte_final = self.np_random.choice(aportes_validos)
+            
+            # valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/semana
+        
+            # if pd.isna(valor):
+            #     valor = 0.0
+            #     print("OJO OJO OJO no encontro valor de aporte determnistico")
+            #     print("paso: ", self.tiempo)
+    
+            if(self.DETERMINISTICO == 1):    
+                return valor
+            else:
+                return aporte_final * 168
+            
+        else:
+            # modo datos historicos
+            return self.datos_historicos.iloc[self.indice_inicial_episodio + self.tiempo, 2] * 3600 * 168 / 1e6 # hm3/semana
+
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            return energias_demandas.iloc[self.tiempo] * 1.2
+            # return energias_demandas.iloc[self.tiempo] * 1.2
+            return energias_demandas.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
     
@@ -288,7 +330,7 @@ class HydroThermalEnv(gym.Env):
 
     def _despachar(self, qt):
         # Demanda residual
-        demanda_residual = self._demanda() - self._gen_renovable()# MWh
+        demanda_residual = self._demanda() - self._gen_renovable() # MWh
 
         # Energia hidro
         energia_hidro = self.K_CLAIRE * qt # MWh
@@ -499,56 +541,122 @@ def cargar_o_entrenar_modelo(model_path):
 
     return model
 
-def evaluar_modelo(model, eval_env, num_pasos=51, n_eval_episodes=100):
+def evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=100):
     resultados_todos_episodios = []
-    recompensa_total = []
+    recompensas_ep = []
 
-    print(f"Evaluando durante {n_eval_episodes} episodios...")
     n_envs = getattr(eval_env, "num_envs", 1)
 
-    for i in range(n_eval_episodes):
-        obs = eval_env.reset()
-        recompensa_episodio = 0
-        state, episode_start = None, np.ones((n_envs,), dtype=bool)
-        
-        for _ in range(num_pasos + 1):
-            action, state = model.predict(
-                obs, 
-                state=state, 
-                episode_start=episode_start, 
-                deterministic=True
-            )
-            obs, rewards, dones, infos = eval_env.step(action)
+    # Un solo reset al inicio
+    obs = eval_env.reset()
+    state = None
+    episode_start = np.ones((n_envs,), dtype=bool)
 
-            # Extrae el primer env (usas n_envs=1)
-            a = int(np.asarray(action).reshape(-1)[0])
-            r = float(np.asarray(rewards).reshape(-1)[0])
-            info = infos[0] if isinstance(infos, (list, tuple)) else infos
-            
-            resultado_paso = info.copy()
-            resultado_paso["action"] = a
-            resultado_paso["reward"] = r
-            resultados_todos_episodios.append(resultado_paso)
-            recompensa_episodio += r
+    episodios_cerrados = 0
+    recompensa_acum = np.zeros(n_envs, dtype=float)
+    episode_id = np.zeros(n_envs, dtype=int)  # para identificar episodios en df_all
 
-            episode_start = dones
-            if np.any(dones):
-                break
-        
-        recompensa_total.append(recompensa_episodio)
-    
-    # Calcular y mostrar recompensa promedio por episodio
-    recompensa_promedio = np.mean(recompensa_total)
-    recompensa_std = np.std(recompensa_total)
-    print(f"Recompensa promedio por episodio: {recompensa_promedio:.2f} +/- {recompensa_std:.2f}")
+    while episodios_cerrados < n_eval_episodes:
+        action, state = model.predict(
+            obs,
+            state=state,
+            episode_start=episode_start,  # MUY importante para LSTM
+            deterministic=True
+        )
+        obs, rewards, dones, infos = eval_env.step(action)
 
-    # Convertir todo a un único DataFrame
+        # normalizamos formas
+        rewards_np = np.asarray(rewards).reshape(-1)
+        dones_np = np.asarray(dones).reshape(-1)
+        acts = np.asarray(action)
+
+        # acumulo recompensa y logueo por env
+        recompensa_acum += rewards_np
+        for i in range(n_envs):
+            info_i = infos[i] if isinstance(infos, (list, tuple)) else infos
+
+            # acción como escalar si es 1-D
+            if acts.ndim == 1:
+                act_i = float(acts[i])
+            else:
+                flat = acts[i].reshape(-1)
+                act_i = float(flat[0]) if flat.size else np.nan
+
+            fila = dict(info_i)
+            fila["action"] = act_i
+            fila["reward"] = float(rewards_np[i])
+            fila["episode_id"] = int(episode_id[i])
+            resultados_todos_episodios.append(fila)
+
+        # SB3 necesita saber si empieza episodio nuevo (para resetear el estado LSTM)
+        episode_start = dones_np
+
+        # cierro episodios que terminaron (el VecEnv ya los reseteó solo)
+        for i in range(n_envs):
+            if dones_np[i]:
+                recompensas_ep.append(recompensa_acum[i])
+                recompensa_acum[i] = 0.0
+                episodios_cerrados += 1
+                episode_id[i] += 1
+
+    # DataFrames de salida
     df_all = pd.DataFrame(resultados_todos_episodios)
-
-    # Calcular el promedio por paso de tiempo
-    df_avg = df_all.groupby("tiempo").mean(numeric_only=True).reset_index()
-            
+    df_avg = df_all.groupby("tiempo", as_index=False).mean(numeric_only=True)
     return df_avg, df_all
+
+
+# def evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=100):
+#     resultados_todos_episodios = []
+#     recompensa_total = []
+
+#     print(f"Evaluando durante {n_eval_episodes} episodios...")
+#     n_envs = getattr(eval_env, "num_envs", 1)
+
+
+#     for i in range(n_eval_episodes):
+#         obs = eval_env.reset()        
+
+#         recompensa_episodio = 0
+#         state, episode_start = None, np.ones((n_envs,), dtype=bool)
+#         print(i)
+#         for _ in range(num_pasos + 1):
+#             action, state = model.predict(
+#                 obs, 
+#                 state=state, 
+#                 episode_start=episode_start, 
+#                 deterministic=True
+#             )
+#             obs, rewards, dones, infos = eval_env.step(action)
+
+#             # Extrae el primer env (usas n_envs=1)
+#             a = int(np.asarray(action).reshape(-1)[0])
+#             r = float(np.asarray(rewards).reshape(-1)[0])
+#             info = infos[0] if isinstance(infos, (list, tuple)) else infos
+            
+#             resultado_paso = info.copy()
+#             resultado_paso["action"] = a
+#             resultado_paso["reward"] = r
+#             resultados_todos_episodios.append(resultado_paso)
+#             recompensa_episodio += r
+
+#             episode_start = dones
+#             if np.any(dones):
+#                 break
+        
+#         recompensa_total.append(recompensa_episodio)
+    
+#     # Calcular y mostrar recompensa promedio por episodio
+#     recompensa_promedio = np.mean(recompensa_total)
+#     recompensa_std = np.std(recompensa_total)
+#     print(f"Recompensa promedio por episodio: {recompensa_promedio:.2f} +/- {recompensa_std:.2f}")
+
+#     # Convertir todo a un único DataFrame
+#     df_all = pd.DataFrame(resultados_todos_episodios)
+
+#     # Calcular el promedio por paso de tiempo
+#     df_avg = df_all.groupby("tiempo").mean(numeric_only=True).reset_index()
+            
+#     return df_avg, df_all
 
 def guardar_trayectorias(fecha_hora, df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
@@ -656,11 +764,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"No se pudo cargar VecNormalize: {e}")
 
-    eval_env.reset()
-    df_eval, df_all = evaluar_modelo(model, eval_env, num_pasos=103, n_eval_episodes=100)
+    df_eval, df_all = evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=114)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
-    num_pasos = 103  
+    num_pasos = 155  
 
     # Lista para guardar los DataFrames
     dfs_escenarios = [df_all.iloc[i*num_pasos:(i+1)*num_pasos].reset_index(drop=True) for i in range(100)]

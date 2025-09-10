@@ -88,7 +88,7 @@ class HydroThermalEnv(gym.Env):
     COSTO_TERMICO_ALTO = 300 # USD/MWh
 
     # cambiar a 0 si queremos usar aportes estocásticos
-    DETERMINISTICO = 1
+    DETERMINISTICO = 0
 
     def __init__(self):
         self.N_BINS_VOL = 20
