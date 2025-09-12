@@ -88,14 +88,11 @@ def leer_archivo(rutaArchivo, sep=None, header=0, sheet_name=0):
         return pd.read_excel(rutaArchivo, header=header,sheet_name=sheet_name)
     elif rutaArchivo.endswith('csv'):
         return pd.read_csv(rutaArchivo, sep=sep, header=header, encoding='cp1252')
-    # elif rutaArchivo.endswith('xlt'):
-    #     return pd.read_csv(rutaArchivo, sep=sep, header=header, engine="python", encoding='latin-1')
 
 class HydroThermalEnv(gym.Env):
     T0 = 0
     T_MAX = 155
     N_HIDRO = 5
-    veces=0
 
     P_CLAIRE_MAX = 1541 # MW
     P_SOLAR_MAX = 254 # MW
@@ -114,10 +111,10 @@ class HydroThermalEnv(gym.Env):
 
     V_CLAIRE_TUR_MAX = P_CLAIRE_MAX * 168 / K_CLAIRE # hm3
 
-    VALOR_EXPORTACION = 0.0 # USD/MWh 
+    VALOR_EXPORTACION = 1e-6 # USD/MWh 
     COSTO_TERMICO_BAJO = 100.0 # USD/MWh 
     COSTO_TERMICO_ALTO = 300.0 # USD/MWh
-    COSTO_VERTIMIENTO = 30.0 # USD/MWh
+    COSTO_VERTIMIENTO = 0.0 # USD/MWh
 
     # cambiar a 0 si queremos usar aportes estocásticos
     DETERMINISTICO = 0
@@ -184,11 +181,10 @@ class HydroThermalEnv(gym.Env):
         # IMPORTANTE: inicializa el RNG del entorno
         super().reset(seed=seed)
 
-        self.modo = self.MODO_EVALUACION
         self.indice_inicial_episodio = self.episodios_recorridos*52
         self.episodios_recorridos += 1
 
-        if self.modo not in {"markov", "historico"}:
+        if self.MODO_EVALUACION not in {"markov", "historico"}:
             raise ValueError("modo debe ser 'markov' u 'historico'")
 
         self.volumen = self.V0
@@ -201,12 +197,11 @@ class HydroThermalEnv(gym.Env):
             "hidrologia_inicial": self.hidrologia,
             "tiempo_inicial": self.tiempo
         }
-        print("llamada: ", self.veces)
-        self.veces+=1
+
         return self._get_obs(), info
     
     def _inicial_hidrologia(self):
-        if self.modo == "markov":
+        if self.MODO_EVALUACION == "markov":
             # retorna el estado inicial del estado hidrológico 0,1,2,3,4
             return np.int64(2)
         else:
@@ -218,7 +213,7 @@ class HydroThermalEnv(gym.Env):
 
     def _siguiente_hidrologia(self):
         self.hidrologia_anterior = self.hidrologia
-        if self.modo == "markov":
+        if self.MODO_EVALUACION == "markov":
             # retorna el estado hidrológico siguiente 0,1,2,3,4
             # array con las clases 0,1,2,3,4
             clases = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0])
@@ -236,7 +231,7 @@ class HydroThermalEnv(gym.Env):
         return hidrologia_siguiente
     
     def _aporte(self):
-        if self.modo == "markov":
+        if self.MODO_EVALUACION == "markov":
             # guardo fila de estados para la semana actual
             estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
@@ -283,7 +278,8 @@ class HydroThermalEnv(gym.Env):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
         energias_demandas = self.data_demanda["PROMEDIO"]
         if self.tiempo < len(energias_demandas):
-            # return energias_demandas.iloc[self.tiempo] * 1.2
+            # ESTO ESTA COMENTADO PORQUE AHORA SE AUMENTO EN EL MOP A POR 1.2 ENTONCES LA DEMANDA YA VIENE MAS GRANDE, HAY QUE USARLA ASI COMO VIENE (SIN MULTIPLICAR)
+            # return energias_demandas.iloc[self.tiempo] * 1.2 
             return energias_demandas.iloc[self.tiempo]
         else:
             raise ValueError("Tiempo fuera de rango para datos de demanda")
@@ -326,8 +322,8 @@ class HydroThermalEnv(gym.Env):
         if demanda_residual <= self.P_TERMICO_ALTO_MAX * 168:
             return demanda_residual
         else:
-            raise ValueError("Demanda residual excede la capacidad del térmico alto")
-
+            return self.P_TERMICO_ALTO_MAX * 168
+        
     def _despachar(self, qt):
         # Demanda residual
         demanda_residual = self._demanda() - self._gen_renovable() # MWh
@@ -341,13 +337,11 @@ class HydroThermalEnv(gym.Env):
         demanda_residual -= energia_termico_bajo
         
         # Termico alto
-        energia_termico_alto = 0.0
-        if demanda_residual > 0.0:
-            energia_termico_alto = self._gen_termico_alto(demanda_residual) # MWh
-            demanda_residual -= energia_termico_alto
+        energia_termico_alto = self._gen_termico_alto(max(demanda_residual, 0.0)) # MWh
+        demanda_residual -= energia_termico_alto
 
         # Energia exportada
-        energia_exportada = max(-demanda_residual, 0.0) # MWh
+        energia_exportada = np.abs(demanda_residual) # MWh
 
         # Ingreso por exportación
         ingreso_exportacion = energia_exportada * self.VALOR_EXPORTACION # USD
@@ -418,7 +412,7 @@ class HydroThermalEnv(gym.Env):
         costo_vertimiento = energia_vertida * self.COSTO_VERTIMIENTO # USD
 
         # Recompensa
-        reward_usd = - costo_termico - costo_vertimiento  # USD
+        reward_usd = - costo_termico - costo_vertimiento + ingreso_exportacion  # USD
         reward = reward_usd / 1e6  # escalar a MUSD
 
         done = (self.tiempo >= self.T_MAX)
@@ -502,7 +496,7 @@ def entrenar():
         vec_env,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        n_steps=52,         # 1/2 episodio por actualización
+        n_steps=104,       
         gamma=0.999,         # mira mas lejos
         ent_coef=0.005,      # evita colapso temprano a extremos
         learning_rate=3e-4,
@@ -541,7 +535,8 @@ def cargar_o_entrenar_modelo(model_path):
 
     return model
 
-def evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=100):
+def evaluar_modelo(model, eval_env, modo_evaluacion="markov", n_eval_episodes=100):
+    print("Evaluando con modo:", modo_evaluacion)
     resultados_todos_episodios = []
     recompensas_ep = []
 
@@ -603,60 +598,6 @@ def evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=100):
     df_all = pd.DataFrame(resultados_todos_episodios)
     df_avg = df_all.groupby("tiempo", as_index=False).mean(numeric_only=True)
     return df_avg, df_all
-
-
-# def evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=100):
-#     resultados_todos_episodios = []
-#     recompensa_total = []
-
-#     print(f"Evaluando durante {n_eval_episodes} episodios...")
-#     n_envs = getattr(eval_env, "num_envs", 1)
-
-
-#     for i in range(n_eval_episodes):
-#         obs = eval_env.reset()        
-
-#         recompensa_episodio = 0
-#         state, episode_start = None, np.ones((n_envs,), dtype=bool)
-#         print(i)
-#         for _ in range(num_pasos + 1):
-#             action, state = model.predict(
-#                 obs, 
-#                 state=state, 
-#                 episode_start=episode_start, 
-#                 deterministic=True
-#             )
-#             obs, rewards, dones, infos = eval_env.step(action)
-
-#             # Extrae el primer env (usas n_envs=1)
-#             a = int(np.asarray(action).reshape(-1)[0])
-#             r = float(np.asarray(rewards).reshape(-1)[0])
-#             info = infos[0] if isinstance(infos, (list, tuple)) else infos
-            
-#             resultado_paso = info.copy()
-#             resultado_paso["action"] = a
-#             resultado_paso["reward"] = r
-#             resultados_todos_episodios.append(resultado_paso)
-#             recompensa_episodio += r
-
-#             episode_start = dones
-#             if np.any(dones):
-#                 break
-        
-#         recompensa_total.append(recompensa_episodio)
-    
-#     # Calcular y mostrar recompensa promedio por episodio
-#     recompensa_promedio = np.mean(recompensa_total)
-#     recompensa_std = np.std(recompensa_total)
-#     print(f"Recompensa promedio por episodio: {recompensa_promedio:.2f} +/- {recompensa_std:.2f}")
-
-#     # Convertir todo a un único DataFrame
-#     df_all = pd.DataFrame(resultados_todos_episodios)
-
-#     # Calcular el promedio por paso de tiempo
-#     df_avg = df_all.groupby("tiempo").mean(numeric_only=True).reset_index()
-            
-#     return df_avg, df_all
 
 def guardar_trayectorias(fecha_hora, df_trayectorias, output_dir="figures"):
     if not os.path.exists(output_dir):
@@ -764,7 +705,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"No se pudo cargar VecNormalize: {e}")
 
-    df_eval, df_all = evaluar_modelo(model, eval_env, num_pasos=155, n_eval_episodes=114)
+    df_eval, df_all = evaluar_modelo(model, eval_env, HydroThermalEnv.MODO_EVALUACION, n_eval_episodes=114)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
     num_pasos = 155  
