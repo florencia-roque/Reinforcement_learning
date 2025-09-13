@@ -119,7 +119,7 @@ class HydroThermalEnv(gym.Env):
     # cambiar a 0 si queremos usar aportes estocásticos
     DETERMINISTICO = 0
 
-    MODO_EVALUACION = "historico"
+    MODO = "markov"
 
     def __init__(self):
 
@@ -184,7 +184,7 @@ class HydroThermalEnv(gym.Env):
         self.indice_inicial_episodio = self.episodios_recorridos*52
         self.episodios_recorridos += 1
 
-        if self.MODO_EVALUACION not in {"markov", "historico"}:
+        if self.MODO not in {"markov", "historico"}:
             raise ValueError("modo debe ser 'markov' u 'historico'")
 
         self.volumen = self.V0
@@ -201,7 +201,7 @@ class HydroThermalEnv(gym.Env):
         return self._get_obs(), info
     
     def _inicial_hidrologia(self):
-        if self.MODO_EVALUACION == "markov":
+        if self.MODO == "markov":
             # retorna el estado inicial del estado hidrológico 0,1,2,3,4
             return np.int64(2)
         else:
@@ -213,7 +213,7 @@ class HydroThermalEnv(gym.Env):
 
     def _siguiente_hidrologia(self):
         self.hidrologia_anterior = self.hidrologia
-        if self.MODO_EVALUACION == "markov":
+        if self.MODO == "markov":
             # retorna el estado hidrológico siguiente 0,1,2,3,4
             # array con las clases 0,1,2,3,4
             clases = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0])
@@ -231,7 +231,7 @@ class HydroThermalEnv(gym.Env):
         return hidrologia_siguiente
     
     def _aporte(self):
-        if self.MODO_EVALUACION == "markov":
+        if self.MODO == "markov":
             # guardo fila de estados para la semana actual
             estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
@@ -469,10 +469,37 @@ class OneHotFlattenObs(gym.ObservationWrapper):
         obs_res = np.concatenate(([v_norm], hidro_oh, time_oh), axis=0)
         return obs_res
 
-def make_env():
+def make_train_env():
     env = HydroThermalEnv()
     env = OneHotFlattenObs(env)
     env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
+    inner_env = env.unwrapped
+    inner_env.MODO = "markov"
+    return env
+
+def make_eval_env():
+    env = HydroThermalEnv()
+    env = OneHotFlattenObs(env)
+    env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
+    inner_env = env.unwrapped
+
+    # Pedir modo de evaluacion al usuario
+    modo_eval = input("Ingrese modo de evaluación M para Markov o H para historico: ").strip().lower()
+
+    # Validar y asignar
+    if modo_eval in ["m", "h"]:
+
+        if modo_eval == "m":
+            modo_eval = "markov"
+        else:
+            modo_eval = "historico"
+
+        inner_env.MODO = modo_eval
+        
+        print(f"Modo de evaluación seteado en: {inner_env.MODO}")
+    else:
+        print("Opción inválida, se mantiene el valor por defecto:", HydroThermalEnv.MODO)
+
     return env
 
 def entrenar():
@@ -480,7 +507,7 @@ def entrenar():
     t0 = time.perf_counter()
     # vectorizado de entrenamiento (usar DummyVecEnv en Windows para evitar sobrecarga de procesos)
     n_envs = 8
-    vec_env = DummyVecEnv([make_env for _ in range(n_envs)])
+    vec_env = DummyVecEnv([make_train_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)  # <<< normaliza
 
@@ -504,7 +531,7 @@ def entrenar():
     )
 
     # calcular total_timesteps: por ejemplo 2000 episodios * 104 pasos
-    total_episodes = 2_000
+    total_episodes = 2000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     callback = LivePlotCallback(plot_every=1)
@@ -696,7 +723,9 @@ if __name__ == "__main__":
 
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
-    eval_env = DummyVecEnv([make_env])
+   
+    eval_env_bef_dummy = make_eval_env()
+    eval_env = DummyVecEnv([lambda: eval_env_bef_dummy])
     try:
         eval_env = VecNormalize.load("vecnorm.pkl", eval_env)
         eval_env.training = False
@@ -705,7 +734,8 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"No se pudo cargar VecNormalize: {e}")
 
-    df_eval, df_all = evaluar_modelo(model, eval_env, HydroThermalEnv.MODO_EVALUACION, n_eval_episodes=114)
+    inner_env = eval_env_bef_dummy.unwrapped
+    df_eval, df_all = evaluar_modelo(model, eval_env, inner_env.MODO, n_eval_episodes=114)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 
     num_pasos = 155  
