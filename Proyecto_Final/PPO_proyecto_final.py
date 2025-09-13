@@ -258,6 +258,7 @@ class HydroThermalEnv(gym.Env):
             # sorteo uniformemente uno de los validos
                 aporte_final = self.np_random.choice(aportes_validos)
             
+            # TO-DO: Poner los valores de aportes deterministicos para 3 años
             # valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/semana
         
             # if pd.isna(valor):
