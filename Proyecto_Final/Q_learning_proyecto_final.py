@@ -14,7 +14,7 @@ matplotlib.use("TkAgg")
 
 # --- Plotter simple de recompensas por episodio ---
 class LiveRewardPlotter:
-    def __init__(self, window=100, refresh_every=10):
+    def __init__(self, window=100, refresh_every=10, title=None):
         self.window = window
         self.refresh_every = refresh_every
         self.rewards_ep = []
@@ -24,7 +24,7 @@ class LiveRewardPlotter:
         self.fig, self.ax = plt.subplots()
         self.ax.set_xlabel("Episodio")
         self.ax.set_ylabel("Recompensa por episodio")
-        self.ax.set_title("Entrenamiento del Agente")
+        self.ax.set_title(title)
         self.ax.grid(True)
 
         (self.line,) = self.ax.plot([], [], lw=1, label="Reward")
@@ -536,9 +536,6 @@ def entrenar(env):
     plotter.close()
     return inner_env.Q
 
-
-
-
 def evaluar_modelo(Q, eval_env, modo_evaluacion="markov", num_pasos=155, n_eval_episodes=100):
     print("Evaluando con modo:", modo_evaluacion)
     resultados_todos_episodios = []
@@ -619,11 +616,7 @@ if __name__ == "__main__":
     EVAL_CSV_RESULTADOS_AGENTE_PATH = os.path.join(resultados_promedio,"resultados_agente.csv")
     EVAL_CSV_COSTOS_PATH = os.path.join(resultados_promedio,"costos.csv")
 
-    # Evaluar el modelo
-    print("Iniciando evaluación del modelo...")
-    eval_env = make_eval_env()
-    eval_env.reset(seed=123)
-    inner_env = eval_env.unwrapped
+    train_env = make_train_env()
 
     # Verificar si existe la tabla Q
     if os.path.exists("Q_table.npy"):
@@ -634,11 +627,16 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error al cargar la tabla Q: {e}")
             print("Entrenando Q-learning de nuevo...")
-            Q = entrenar(eval_env)
+            Q = entrenar(train_env)
     else:
         print("Archivo de tabla Q no encontrado, entrenando uno nuevo...")        
-        Q = entrenar(eval_env)
+        Q = entrenar(train_env)
     
+    # Evaluar el modelo
+    print("Iniciando evaluación del modelo...")
+    eval_env = make_eval_env()
+    eval_env.reset(seed=123)
+    inner_env = eval_env.unwrapped
     
     df_eval, df_all = evaluar_modelo(Q, eval_env, inner_env.MODO, n_eval_episodes=114)
 
