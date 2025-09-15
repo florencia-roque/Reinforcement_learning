@@ -501,7 +501,7 @@ def entrenar():
     vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
 
-    model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=12, learning_rate=5e-4)
+    model = A2C("MlpPolicy", vec_env, verbose=1, n_steps=104, learning_rate=3e-4, gamma=0.999, device="auto")
 
     # calcular total_timesteps: por ejemplo 2000 episodios * 104 pasos
     total_episodes = 2000
