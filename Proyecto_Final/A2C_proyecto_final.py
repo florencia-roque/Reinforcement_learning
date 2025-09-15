@@ -2,6 +2,7 @@
 from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import DummyVecEnv
 import os
 import time
 import numpy as np
@@ -497,7 +498,7 @@ def entrenar():
     t0 = time.perf_counter()
     # vectorizado de entrenamiento (8 envs en procesos separados)
     n_envs = 8
-    vec_env = SubprocVecEnv([make_env for _ in range(n_envs)])
+    vec_env = SubprocVecEnv([make_train_env for _ in range(n_envs)])
     vec_env = VecMonitor(vec_env)
 
     model = A2C("MlpPolicy", vec_env, verbose=2, n_steps=12, learning_rate=5e-4)
@@ -506,7 +507,7 @@ def entrenar():
     total_episodes = 2000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
-    callback = LivePlotCallback(plot_every=1)
+    callback = LivePlotCallback()
     model.learn(total_timesteps=total_timesteps, callback=callback)
     model.save("a2c_hydro_thermal_claire")
 
@@ -550,12 +551,7 @@ def evaluar_modelo(model, eval_env, modo_evaluacion="markov", n_eval_episodes=10
     episode_id = np.zeros(n_envs, dtype=int)  # para identificar episodios en df_all
 
     while episodios_cerrados < n_eval_episodes:
-        action, state = model.predict(
-            obs,
-            state=state,
-            episode_start=episode_start,  # MUY importante para LSTM
-            deterministic=True
-        )
+        action, _ = model.predict(obs, deterministic=True)
         obs, rewards, dones, infos = eval_env.step(action)
 
         # normalizamos formas
@@ -695,9 +691,8 @@ if __name__ == "__main__":
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
    
-    eval_env_bef_dummy = make_eval_env()
-    eval_env = DummyVecEnv([lambda: eval_env_bef_dummy])
-    inner_env = eval_env_bef_dummy.unwrapped
+    eval_env = DummyVecEnv([make_eval_env])
+    inner_env = eval_env.envs[0].unwrapped 
     df_eval, df_all = evaluar_modelo(model, eval_env, inner_env.MODO, n_eval_episodes=114)
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
 

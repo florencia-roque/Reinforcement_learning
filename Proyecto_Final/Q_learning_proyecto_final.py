@@ -425,6 +425,10 @@ class HydroThermalEnv(gym.Env):
         # Mapeo de variables internas a observación del agente
         idx = codificar_estados(self.volumen_discreto,self.N_BINS_VOL,self.hidrologia,self.N_HIDRO,self.tiempo)
         
+        if not self.observation_space.contains(idx):
+            print(f"[DEBUG] idx={idx}, t={self.tiempo}, h={self.hidrologia}, vbin={self.volumen_discreto}")
+
+
         # Validar contra observation_space
         assert self.observation_space.contains(idx), f"Observación inválida: {idx}. Debe estar en {self.observation_space}"
         return idx
@@ -491,7 +495,7 @@ def entrenar(env):
     t0 = time.perf_counter()
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 10000
+    total_episodes = 5000
 
     plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
 
@@ -632,10 +636,13 @@ if __name__ == "__main__":
         print("Archivo de tabla Q no encontrado, entrenando uno nuevo...")        
         Q = entrenar(train_env)
     
+    # --- Guardar tabla Q ---
+    ruta_q = os.path.join(carpeta, "Q_table.npy")
+    np.save(ruta_q, Q)
+
     # Evaluar el modelo
     print("Iniciando evaluación del modelo...")
     eval_env = make_eval_env()
-    eval_env.reset(seed=123)
     inner_env = eval_env.unwrapped
     
     df_eval, df_all = evaluar_modelo(Q, eval_env, inner_env.MODO, n_eval_episodes=114)
@@ -661,10 +668,6 @@ if __name__ == "__main__":
     # Lista para guardar los DataFrames
     dfs_escenarios = [df_all.iloc[i*num_pasos:(i+1)*num_pasos].reset_index(drop=True) for i in range(100)]
 
-    # --- Guardar tabla Q ---
-    ruta_q = os.path.join(carpeta, "Q_table.npy")
-    np.save(ruta_q, Q)
-
     for i in range(len(dfs_escenarios)):
         df_escenario = dfs_escenarios[i]
         # Crear nombre con fecha y hora actual
@@ -681,7 +684,7 @@ if __name__ == "__main__":
     print(f"Resultados de energia guardados en {EVAL_CSV_ENERGIAS_PATH}")
 
     # Guardar variables de estado en un mismo csv
-    df_estados = df_eval.loc[:, ["volumen_discreto","volumen", "hidrologia", "tiempo", "aportes", "vertimiento", "volumen_turbinado"]]
+    df_estados = df_eval.loc[:, ["volumen_discreto", "hidrologia", "tiempo", "aportes", "vertimiento", "volumen_turbinado"]]
     df_estados.to_csv(EVAL_CSV_ESTADOS_PATH, index=False)
     print(f"Resultados de variables de estado guardados en {EVAL_CSV_ESTADOS_PATH}")
 
