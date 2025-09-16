@@ -6,3 +6,5 @@ Proyecto_Final/*energias.xlsx
 Proyecto_Final/*.png
 Proyecto_Final/*.zip
 Proyecto_Final/Q_table.npy
+Proyecto_Final/vecnorm.pkl
+Proyecto_Final/COMPARACION_MOP_RL
