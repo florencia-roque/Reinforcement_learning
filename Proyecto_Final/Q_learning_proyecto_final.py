@@ -69,7 +69,7 @@ class HydroThermalEnv(gym.Env):
     P_SOLAR_MAX = 254 # MW
     P_EOLICO_MAX = 1584.7 # MW
     P_BIOMASA_MAX = 487.3 # MW
-    P_TERMICO_BAJO_MAX = 500 # MW
+    P_TERMICO_BAJO_MAX = 1300 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
@@ -93,10 +93,10 @@ class HydroThermalEnv(gym.Env):
     MODO = "markov"
 
     def __init__(self):
-        self.N_BINS_VOL = 20
+        self.N_BINS_VOL = 10
         self.VOL_EDGES = np.linspace(self.V_CLAIRE_MIN, self.V_CLAIRE_MAX, self.N_BINS_VOL + 1)
         self.N_STATES = self.N_BINS_VOL*self.N_HIDRO*(self.T_MAX+1)
-        self.N_ACTIONS = 40
+        self.N_ACTIONS = 20
         self.Q = np.zeros((self.N_STATES, self.N_ACTIONS))
 
         self.alpha = 0.001   # learning rate
@@ -268,7 +268,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
         energias_eolico = self.data_eolico["PROMEDIO"]
         if self.tiempo < len(energias_eolico):
-            return energias_eolico.iloc[self.tiempo]
+            return 0
         else:
             raise ValueError("Tiempo fuera de rango para datos eólicos")
 
@@ -276,7 +276,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación solar para el tiempo actual según la cronica sorteada
         energias_solar = self.data_solar["PROMEDIO"]
         if self.tiempo < len(energias_solar):
-            return energias_solar.iloc[self.tiempo]
+            return 0
         else:
             raise ValueError("Tiempo fuera de rango para datos solares")
 
@@ -284,7 +284,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación de biomasa para el tiempo actual según la cronica sorteada
         energias_biomasa = self.data_biomasa["PROMEDIO"]
         if self.tiempo < len(energias_biomasa):
-            return energias_biomasa.iloc[self.tiempo]
+            return 0
         else:
             raise ValueError("Tiempo fuera de rango para datos biomasa")
 
@@ -360,6 +360,7 @@ class HydroThermalEnv(gym.Env):
         ingreso_exportacion, costo_termico, energia_exportada, energia_termico_bajo, energia_termico_alto, energia_hidro = self._despachar(qt)
 
         info = {
+            "volumen": self.volumen,
             "volumen_discreto": self.volumen_discreto,
             "hidrologia": self.hidrologia,
             "tiempo": self.tiempo,
@@ -495,7 +496,7 @@ def entrenar(env):
     t0 = time.perf_counter()
 
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
-    total_episodes = 5000
+    total_episodes = 3000
 
     plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
 
@@ -637,7 +638,8 @@ if __name__ == "__main__":
         Q = entrenar(train_env)
     
     # --- Guardar tabla Q ---
-    ruta_q = os.path.join(carpeta, "Q_table.npy")
+    # ruta_q = os.path.join(carpeta, "Q_table.npy")
+    ruta_q = "Q_table.npy"
     np.save(ruta_q, Q)
 
     # Evaluar el modelo

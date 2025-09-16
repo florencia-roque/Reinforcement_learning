@@ -88,7 +88,7 @@ class HydroThermalEnv(gym.Env):
     P_SOLAR_MAX = 254 # MW
     P_EOLICO_MAX = 1584.7 # MW
     P_BIOMASA_MAX = 487.3 # MW
-    P_TERMICO_BAJO_MAX = 500 # MW
+    P_TERMICO_BAJO_MAX = 1300 # MW
     P_TERMICO_ALTO_MAX = 5000 # MW
 
     Q_CLAIRE_MAX = 11280 * 3600 / 1e6 # hm3/h
@@ -279,7 +279,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación eólica para el tiempo actual según la cronica sorteada
         energias_eolico = self.data_eolico["PROMEDIO"]
         if self.tiempo < len(energias_eolico):
-            return energias_eolico.iloc[self.tiempo]
+            return 0
         else:
             raise ValueError("Tiempo fuera de rango para datos eólicos")
 
@@ -287,7 +287,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación solar para el tiempo actual según la cronica sorteada
         energias_solar = self.data_solar["PROMEDIO"]
         if self.tiempo < len(energias_solar):
-            return energias_solar.iloc[self.tiempo]
+            return 0
         else:
             raise ValueError("Tiempo fuera de rango para datos solares")
 
@@ -295,7 +295,7 @@ class HydroThermalEnv(gym.Env):
         # Obtener generación de biomasa para el tiempo actual según la cronica sorteada
         energias_biomasa = self.data_biomasa["PROMEDIO"]
         if self.tiempo < len(energias_biomasa):
-            return energias_biomasa.iloc[self.tiempo]
+            return 0
         else:
             raise ValueError("Tiempo fuera de rango para datos biomasa")
 
@@ -504,7 +504,7 @@ def entrenar():
     model = A2C("MlpPolicy", vec_env, verbose=1, n_steps=104, learning_rate=3e-4, gamma=0.999, device="auto")
 
     # calcular total_timesteps: por ejemplo 2000 episodios * 104 pasos
-    total_episodes = 2000
+    total_episodes = 5000
     total_timesteps = total_episodes * (HydroThermalEnv.T_MAX + 1)
 
     callback = LivePlotCallback()
