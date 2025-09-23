@@ -19,16 +19,26 @@ class LiveRewardPlotter:
         self.refresh_every = refresh_every
         self.rewards_ep = []
         self.moving_avg = []
-
         plt.ion()
-        self.fig, self.ax = plt.subplots()
-        self.ax.set_xlabel("Episodio")
-        self.ax.set_ylabel("Recompensa por episodio")
-        self.ax.set_title(title)
+        # === Configuración global de estilo ===
+
+        plt.rcParams.update({
+            "font.size": 20,
+            "axes.titlesize": 22,
+            "axes.labelsize": 10,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
+            "legend.fontsize": 10,
+        })
+
+        self.fig, self.ax = plt.subplots(figsize=(14, 6), dpi=400)
+        self.ax.set_xlabel("Episode", labelpad=8)
+        self.ax.set_ylabel("Reward (MUSD)", labelpad=8)
+        self.ax.set_title(title, pad=8)
         self.ax.grid(True)
 
         (self.line,) = self.ax.plot([], [], lw=1, label="Reward")
-        (self.line_avg,) = self.ax.plot([], [], lw=2, label=f"Media móvil ({window})")
+        (self.line_avg,) = self.ax.plot([], [], lw=2, label=f"Moving average ({window})")
         self.ax.legend()
         self.fig.show()
 
@@ -37,6 +47,9 @@ class LiveRewardPlotter:
         # media móvil
         w = min(self.window, len(self.rewards_ep))
         self.moving_avg.append(np.mean(self.rewards_ep[-w:]))
+
+        if(len(self.rewards_ep) + 1 == 3000):
+            print(f"La media de la recompensa converge a aproximadamente {self.moving_avg[-1]} en entrenamiento")
 
         # refrescar cada N episodios
         if len(self.rewards_ep) % self.refresh_every == 0:
@@ -49,7 +62,9 @@ class LiveRewardPlotter:
             self.fig.canvas.flush_events()
             plt.pause(0.001)
 
-    def close(self):
+    def close(self, filename="figures/paper/training_det"):
+        self.fig.savefig(filename, dpi=400, bbox_inches="tight")
+        self.fig.savefig(f"{filename}.pdf", bbox_inches="tight")
         plt.ioff()
         plt.show(block=False)
 
@@ -129,7 +144,7 @@ class HydroThermalEnv(gym.Env):
         # cargar matriz de aportes discretizada (con estado hidrológico 0,1,2,3,4)
         self.data_matriz_aportes_discreta = leer_archivo(f"Datos\\Claire\\clasificado.csv", sep=",", header=0)
 
-        # self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.csv", sep=",", header=0)
+        self.aportes_deterministicos = leer_archivo(f"Datos\\MOP\\aportesDeterministicos.xlsx", sep=",", header=0)
         
         # cargar matriz de aportes continuos (unidad de los aportes de Claire: m3/s )
         self.data_matriz_aportes_claire = leer_archivo(f"Datos\\Claire\\aporte_claire.csv", sep=",", header=0)
@@ -180,19 +195,22 @@ class HydroThermalEnv(gym.Env):
         return self._get_obs(), info
     
     def _inicial_hidrologia(self):
-        if self.MODO == "markov":
+        if self.MODO == "markov" and self.DETERMINISTICO == 0:
             # retorna el estado inicial del estado hidrológico 0,1,2,3,4
             return np.int64(2)
-        else:
+        elif self.MODO == "historico" and self.DETERMINISTICO == 0:
             try:
                 # modo datos historicos
                 return self.datos_historicos.iloc[self.indice_inicial_episodio,3]
             except:
                 return 0
+            
+        elif self.DETERMINISTICO == 1:
+            return self.aportes_deterministicos.iloc[self.tiempo,1]
 
     def _siguiente_hidrologia(self):
         self.hidrologia_anterior = self.hidrologia
-        if self.MODO == "markov":
+        if self.MODO == "markov" and self.DETERMINISTICO == 0:
             # retorna el estado hidrológico siguiente 0,1,2,3,4
             # array con las clases 0,1,2,3,4
             clases = np.arange(self.matrices_hidrologicas[self.tiempo % 52].shape[0])
@@ -202,15 +220,17 @@ class HydroThermalEnv(gym.Env):
                 p=self.matrices_hidrologicas[self.tiempo % 52][self.hidrologia,:]
             )
 
-        else:
-            # modo datos historicos
-        
+        elif self.MODO == "historico" and self.DETERMINISTICO == 0:
             hidrologia_siguiente = self.datos_historicos.iloc[self.indice_inicial_episodio + self.tiempo, 3] 
+
+        elif self.DETERMINISTICO == 1:
+            hidrologia_siguiente = self.aportes_deterministicos.iloc[self.tiempo+1,1]
 
         return hidrologia_siguiente
     
     def _aporte(self):
-        if self.MODO == "markov":
+        # MODO MARKOV PUEDE USARSE PARA ENTRENAR O EVALUAR
+        if self.MODO == "markov" and self.DETERMINISTICO == 0:
             # guardo fila de estados para la semana actual
             estados_t = self.data_matriz_aportes_discreta.loc[self.tiempo % 52] 
 
@@ -235,24 +255,20 @@ class HydroThermalEnv(gym.Env):
                 aporte_final = aportes_promedio
             else:
             # sorteo uniformemente uno de los validos
-                aporte_final = self.np_random.choice(aportes_validos)
+                aporte_final = self.np_random.choice(aportes_validos)*168
             
-            # TO-DO: Poner los valores de aportes deterministicos para 3 años
-            # valor = self.aportes_deterministicos.iloc[self.tiempo , 0] # hm3/semana
-        
-            # if pd.isna(valor):
-            #     valor = 0.0
-            #     print("OJO OJO OJO no encontro valor de aporte determnistico")
-            #     print("paso: ", self.tiempo)
-    
-            if(self.DETERMINISTICO == 1):    
-                return valor
-            else:
-                return aporte_final * 168
+            return aporte_final
             
-        else:
-            # modo datos historicos
+        # SOLO PARA EVALUAR CON LA HISTORIA HABIENDO ENTRENADO CON MARKOV 
+        # NO SE ENTRENA CON LA HISTORIA 
+        elif self.MODO == "historico" and self.DETERMINISTICO == 0:
             return self.datos_historicos.iloc[self.indice_inicial_episodio + self.tiempo, 2] * 3600 * 168 / 1e6 # hm3/semana
+        
+        # SIRVE PARA ENTRENAR Y EVALUAR CON LA TIRA DE APORTES DETERMINISTICOS
+        elif self.DETERMINISTICO == 1:    
+            valor = self.aportes_deterministicos.iloc[self.tiempo , 0] * 3600 * 168 / 1e6 # hm3/semana
+            return valor
+            
 
     def _demanda(self):
         # Obtener demanda de energía para el tiempo actual según la cronica sorteada
@@ -472,22 +488,23 @@ def make_eval_env():
     env = TimeLimit(env, max_episode_steps=HydroThermalEnv.T_MAX+1)
     inner_env = env.unwrapped
 
-    # Pedir modo de evaluacion al usuario
-    modo_eval = input("Ingrese modo de evaluación M para Markov o H para historico: ").strip().lower()
+    if inner_env.DETERMINISTICO == 0:
+        # Pedir modo de evaluacion al usuario
+        modo_eval = input("Ingrese modo de evaluación M para Markov o H para historico: ").strip().lower()
 
-    # Validar y asignar
-    if modo_eval in ["m", "h"]:
+        # Validar y asignar
+        if modo_eval in ["m", "h"]:
 
-        if modo_eval == "m":
-            modo_eval = "markov"
+            if modo_eval == "m":
+                modo_eval = "markov"
+            else:
+                modo_eval = "historico"
+
+            inner_env.MODO = modo_eval
+            
+            print(f"Modo de evaluación seteado en: {inner_env.MODO}")
         else:
-            modo_eval = "historico"
-
-        inner_env.MODO = modo_eval
-        
-        print(f"Modo de evaluación seteado en: {inner_env.MODO}")
-    else:
-        print("Opción inválida, se mantiene el valor por defecto:", HydroThermalEnv.MODO)
+            print("Opción inválida, se mantiene el valor por defecto:", HydroThermalEnv.MODO)
 
     return env
 
@@ -498,7 +515,7 @@ def entrenar(env):
     # calcular total_timesteps: por ejemplo 5000 episodios * 104 pasos
     total_episodes = 3000
 
-    plotter = LiveRewardPlotter(window=100, refresh_every=20,title="Q-learning: recompensa por episodio")
+    plotter = LiveRewardPlotter(window=100, refresh_every=20)
 
     for episode in range(total_episodes):
 
@@ -542,13 +559,15 @@ def entrenar(env):
     return inner_env.Q
 
 def evaluar_modelo(Q, eval_env, modo_evaluacion="markov", num_pasos=155, n_eval_episodes=100):
-    print("Evaluando con modo:", modo_evaluacion)
+    inner_env = eval_env.unwrapped
+
+    if inner_env.DETERMINISTICO == 0:
+        print("Evaluando con modo:", modo_evaluacion)
+
     resultados_todos_episodios = []
     recompensa_total = []
 
     politica = politica_optima(Q)
-
-    inner_env = eval_env.unwrapped
 
     print(f"Evaluando durante {n_eval_episodes} episodios...")
     for i in range(n_eval_episodes):
@@ -652,15 +671,15 @@ if __name__ == "__main__":
     df_eval["reward_usd"] = df_eval["reward"] * 1e6
     guardar_trayectorias(fecha_hora,df_eval)
 
-    # Graficar mapa de calor de la tabla Q obtenida después del entrenamiento
-    plt.figure(figsize=(8, 10))
-    plt.imshow(Q, aspect='auto')
-    plt.colorbar(label="Q(s,a)")
-    plt.xlabel("Acciones (0..4)")
-    plt.ylabel("Estados (idx 0..3119)")
-    plt.title("Q-table completa (estados x acciones)")
-    plt.tight_layout()
-    plt.show()
+    # # Graficar mapa de calor de la tabla Q obtenida después del entrenamiento
+    # plt.figure(figsize=(8, 10))
+    # plt.imshow(Q, aspect='auto')
+    # plt.colorbar(label="Q(s,a)")
+    # plt.xlabel("Acciones (0..4)")
+    # plt.ylabel("Estados (idx 0..3119)")
+    # plt.title("Q-table completa (estados x acciones)")
+    # plt.tight_layout()
+    # plt.show()
 
     # Obtener politica optima aplanada
     politica = politica_optima(Q) # array de shape (3120,)
@@ -668,7 +687,7 @@ if __name__ == "__main__":
     num_pasos = 155  
 
     # Lista para guardar los DataFrames
-    dfs_escenarios = [df_all.iloc[i*num_pasos:(i+1)*num_pasos].reset_index(drop=True) for i in range(100)]
+    dfs_escenarios = [df_all.iloc[i*num_pasos:(i+1)*num_pasos].reset_index(drop=True) for i in range(114)]
 
     for i in range(len(dfs_escenarios)):
         df_escenario = dfs_escenarios[i]
