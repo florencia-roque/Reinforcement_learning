@@ -22,9 +22,15 @@ if not file_path:
     exit()
 
 # === Leer CSV y normalizar columnas ===
-df = pd.read_csv(file_path, sep=",", engine="python")
-df.columns = [normalizar_columna(c) for c in df.columns]
-print("Columnas normalizadas:", df.columns.tolist())
+if file_path.endswith('csv'):
+    df = pd.read_csv(file_path, sep=",", engine="python")
+    df.columns = [normalizar_columna(c) for c in df.columns]
+    print("Columnas normalizadas:", df.columns.tolist())
+
+elif file_path.endswith('xlsx'):
+    df = pd.read_excel(file_path,header=0)
+    df.columns = [normalizar_columna(c) for c in df.columns]
+    print("Columnas normalizadas:", df.columns.tolist())
 
 # === Definir columnas ===
 col_turbinada = "energia_hidro"
@@ -92,6 +98,6 @@ fig.subplots_adjust(right=0.89, bottom=0.28)
 
 # Guardado
 os.makedirs("figures/paper", exist_ok=True)
-plt.savefig("figures/paper/dispatch_evaluation_det.png", dpi=400, bbox_inches="tight")
-plt.savefig("figures/paper/dispatch_evaluation_det.pdf", bbox_inches="tight")  # vectorial para el paper
+plt.savefig("figures/paper/dispatch_evaluation_est.png", dpi=400, bbox_inches="tight")
+plt.savefig("figures/paper/dispatch_evaluation_est.pdf", bbox_inches="tight")  # vectorial para el paper
 plt.show()

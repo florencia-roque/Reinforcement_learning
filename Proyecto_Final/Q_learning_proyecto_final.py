@@ -62,7 +62,7 @@ class LiveRewardPlotter:
             self.fig.canvas.flush_events()
             plt.pause(0.001)
 
-    def close(self, filename="figures/paper/training_det"):
+    def close(self, filename="figures/paper/training_est"):
         self.fig.savefig(filename, dpi=400, bbox_inches="tight")
         self.fig.savefig(f"{filename}.pdf", bbox_inches="tight")
         plt.ioff()
