@@ -49,8 +49,8 @@ plt.rcParams.update({
     "font.size": 20,
     "axes.titlesize": 22,
     "axes.labelsize": 22,
-    "xtick.labelsize": 8,
-    "ytick.labelsize": 8,
+    "xtick.labelsize": 18,
+    "ytick.labelsize": 18,
     "legend.fontsize": 20,
 })
 
@@ -97,7 +97,7 @@ plt.tight_layout(rect=[0, 0, 0.98, 1])  # deja 2% libre a la derecha
 fig.subplots_adjust(right=0.89, bottom=0.28)
 
 # Guardado
-os.makedirs("figures/paper", exist_ok=True)
-plt.savefig("figures/paper/dispatch_evaluation_est.png", dpi=400, bbox_inches="tight")
-plt.savefig("figures/paper/dispatch_evaluation_est.pdf", bbox_inches="tight")  # vectorial para el paper
+os.makedirs("figures/paper/prueba", exist_ok=True)
+plt.savefig("figures/paper/prueba/dispatch_evaluation_det.png", dpi=400, bbox_inches="tight")
+plt.savefig("figures/paper/prueba/dispatch_evaluation_det.pdf", bbox_inches="tight")  # vectorial para el paper
 plt.show()
